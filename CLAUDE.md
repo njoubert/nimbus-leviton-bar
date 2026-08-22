@@ -208,4 +208,7 @@ check the mounted image by eye, tag `v<VERSION>`, `gh release create`. Signing/n
 read `SIGN_IDENTITY` / `NOTARY_PROFILE` from a git-ignored `.signing` (the notary profile is
 per Apple ID, shared across projects). Unsigned builds need "Open Anyway" when quarantined. The release binary is arm64 only (plain
 `swift build`); the installed copy in /Applications is `ditto`ed out of the DMG, not
-`build.sh install`, so it is the exact stapled artifact.
+`build.sh install`, so it is the exact stapled artifact. When mounting a DMG to copy from it,
+use the path `hdiutil attach` prints rather than assuming `/Volumes/<name>` — a stale mount
+from an earlier verify step puts the new one on `/Volumes/<name> 1` and `ditto` then fails
+after the old /Applications copy is already gone. `hdiutil detach … -force` the strays first.
