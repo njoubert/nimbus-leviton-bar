@@ -14,9 +14,10 @@ import AppKit
 class MenuRow: NSView {
     static let height: CGFloat = 24
     static let width: CGFloat = 360
-    /// The highlight's inset from the menu edge and the text's inset, as AppKit draws them.
+    /// The highlight's inset from the menu edge, and the text's inset — AppKit's own, which
+    /// includes the state (checkmark) column that "Launch at Login" brings into the menu.
     static let edgeInset: CGFloat = 5
-    static let textInset: CGFloat = 14
+    static let textInset: CGFloat = 24
 
     var onClick: (() -> Void)?
     var isEnabled = true { didSet { if !isEnabled { hovered = false }; refreshAppearance() } }

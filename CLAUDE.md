@@ -183,6 +183,9 @@ update) apply.
   slider runs 0…maxLevel, not minLevel…maxLevel: 0 is "off" (shown for any off dimmer, and
   dragging there sends `power: OFF` only, keeping the remembered level), anything above 0 is
   floored at `minLevel`.
+- **Plain items' text starts 24 pt in, not 14** — the menu has a state column because
+  "Launch at Login" has a checkmark. `MenuRow.textInset` matches it; measure against a real
+  plain item after touching the layout (screenshot at 2× → halve the pixel offset).
 - **`.byTruncatingTail` shrinks a label's intrinsic width by about a character** — "2 of 4 on"
   rendered as "2 of 4…" with room to spare. Numeric labels use `.byClipping`; the name label
   is the one that gives way (low compression resistance).
