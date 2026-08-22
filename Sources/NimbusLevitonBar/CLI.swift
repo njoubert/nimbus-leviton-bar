@@ -17,6 +17,8 @@ enum CLI {
         case put(path: String, json: String)
         case checkUpdate
         case preflight(app: String)
+        case scenes
+        case scene(name: String)
     }
 
     static func run(_ cmd: Command) -> Int32 {
@@ -143,6 +145,34 @@ enum CLI {
                 for d in after.filter({ $0.roomId == room.id }).sorted(by: { $0.name < $1.name }) {
                     Swift.print("    " + describe(d))
                 }
+
+            case .scenes:
+                let s = try session(client)
+                for r in try block({ try await client.residences(s) }) {
+                    let acts = try block { try await client.activities(s, residenceId: r.id) }
+                    let names = try block { try await client.devices(s, residenceId: r.id) }
+                        .reduce(into: [String: String]()) { $0[$1.id] = $1.name }
+                    Swift.print("\(r.name)  [residence \(r.id)]")
+                    if acts.isEmpty { Swift.print("  (no scenes)") }
+                    for a in acts {
+                        Swift.print("  \(a.name)  [activity \(a.id), icon \(a.icon), \(a.actions.count) actions]")
+                        for x in a.actions { Swift.print("    \(names[x.deviceId] ?? x.deviceId): \(x.fields)") }
+                    }
+                }
+
+            case .scene(let which):
+                let s = try session(client)
+                let all = try block { () async throws -> [Activity] in
+                    var out: [Activity] = []
+                    for r in try await client.residences(s) { out += try await client.activities(s, residenceId: r.id) }
+                    return out
+                }
+                guard let a = all.first(where: { $0.id == which || $0.name.caseInsensitiveCompare(which) == .orderedSame }) else {
+                    fputs("no scene named or numbered \(which); have: \(all.map(\.name).joined(separator: ", "))\n", stderr)
+                    return 1
+                }
+                try block { try await client.executeActivity(s, id: a.id) }
+                Swift.print("ran \(a.name) (\(a.actions.count) actions)")
 
             case .get(let path):
                 // Raw GET, pretty-printed: for poking at endpoints the app does not use yet.

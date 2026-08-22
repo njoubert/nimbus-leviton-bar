@@ -64,6 +64,9 @@ struct Residence: Identifiable, Equatable {
     /// `LevitonClient.roomOrders`. Empty when they never have — then id order stands, which
     /// is what My Leviton itself falls back to.
     var roomOrder: [String] = []
+    /// The residence's scenes, in the API's order. Empty when the account has none, or when
+    /// the scene fetch failed — they are a nicety, never a reason to hide the devices.
+    var activities: [Activity] = []
 
     func devices(in room: Room) -> [Device] { devices.filter { $0.roomId == room.id } }
 
@@ -93,4 +96,27 @@ struct Residence: Identifiable, Equatable {
         let ids = Set(rooms.map(\.id))
         return devices.filter { $0.roomId.map { !ids.contains($0) } ?? true }
     }
+}
+
+/// One entry of a scene: "set IotSwitch 431325 to ON at 40 %". My Leviton stores these as
+/// `residentialActions` rows hanging off an activity (or a room scene).
+struct SceneAction: Equatable {
+    let deviceId: String            // targetModelId, when targetModelName is "IotSwitch"
+    let fields: LevitonClient.DeviceFields
+}
+
+/// A My Leviton **Activity**: a named, whole-residence scene. Running one is fire-and-forget
+/// — an activity has no state of its own, so there is nothing to show back but its name.
+///
+/// (My Leviton also has per-room `ResidentialScene`s, same `residentialActions` shape and a
+/// matching `ResidentialScenes/execute`. This account has none, so they are not modelled.)
+struct Activity: Identifiable, Equatable {
+    let id: String
+    var residenceId: String
+    var name: String
+    /// One of My Leviton's 41 icon names (`goodnight`, `party`, …); free-form in practice —
+    /// owners pick an icon unrelated to the name, so it is not worth drawing.
+    var icon: String
+    /// What the activity does, in the order the server returned it.
+    var actions: [SceneAction]
 }
