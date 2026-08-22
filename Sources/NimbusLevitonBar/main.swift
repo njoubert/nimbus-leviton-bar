@@ -28,6 +28,7 @@ func usage() -> Never {
     usage: NimbusLevitonBar [--enable-login-item | --disable-login-item | --login-item-status]
                             [--render-icon PATH [--size PX]] [--render-iconset DIR]
                             [--login EMAIL | --logout | --print | --set DEVICE on|off|N | --watch]
+                            [--room ROOM on|off | --get PATH | --put PATH JSON | --dump-menu PATH]
     """)
     exit(2)
 }
@@ -75,9 +76,15 @@ while !args.isEmpty {
     case "--print": cli = .print
     case "--watch": cli = .watch
     case "--get": cli = .get(path: takeValue(a))
+    case "--put":
+        let path = takeValue(a), json = takeValue(a)
+        cli = .put(path: path, json: json)
     case "--set":
         let device = takeValue(a), value = takeValue(a)
         cli = .set(device: device, value: value)
+    case "--room":
+        let room = takeValue(a), value = takeValue(a)
+        cli = .room(room: room, value: value)
     case "-h", "--help": usage()
     default:
         // Finder/LaunchServices can pass -psn_… style args; ignore anything unknown.

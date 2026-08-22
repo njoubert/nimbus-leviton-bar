@@ -184,8 +184,15 @@ final class LevitonClient: Sendable {
         try await request("GET", path, token: s.token)
     }
 
-    /// The room's own On/Off, as the My Leviton app does it: the server switches the devices
-    /// that have `includeInRoomOnOff` set and leaves the rest alone.
+    /// Any PUT with a JSON object body (`--put`) — for the record fields the app has no
+    /// business setting on its own, such as `includeInRoomOnOff`.
+    func rawPut(_ s: Keychain.Session, _ path: String, body: [String: Any]) async throws -> Any {
+        try await request("PUT", path, token: s.token, body: body)
+    }
+
+    /// The room's own On/Off, as the My Leviton app does it: the server switches every device
+    /// in the room. The per-device `includeInRoomOnOff` flag has no effect on it (see
+    /// `DeviceStore.toggleRoom`); it is still parsed, so `--print` can show when it changes.
     func setRoomPower(_ s: Keychain.Session, roomId: String, on: Bool) async throws {
         _ = try await request("POST", on ? "ResidentialRooms/turnOn" : "ResidentialRooms/turnOff",
                               query: ["id": roomId], token: s.token, body: [:])

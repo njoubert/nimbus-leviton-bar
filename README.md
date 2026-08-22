@@ -35,25 +35,25 @@ when everything is off, struck through when not signed in. Hover it for the tall
 
 **In the dropdown** — **All Devices** first, the real master switch: its dot is green when
 anything is on, hollow when all is off, red when nothing is reachable or the last request
-failed, with the tally beside it; click it to turn every reachable device off (or on),
-whatever its room settings say. Then your rooms, in the order the My Leviton app shows them (rooms with no
-Wi-Fi device are left out; rooms where nothing is reachable sink to the bottom), and under
-each room its devices, unreachable ones last:
+failed, with the tally beside it; click it to turn every reachable device off (or on). Then
+your rooms, in the order the My Leviton app shows them (rooms with no Wi-Fi device are left
+out; rooms where nothing is reachable sink to the bottom), and under each room its devices,
+unreachable ones last:
 
 | Dot | Meaning |
 |---|---|
 | 🟢 | on — dimmers also show their level and a slider |
 | ⚪ | off |
 | 🔴 | My Leviton can't reach it (dropped off Wi-Fi); the row is disabled |
-| ◎ | ringed: the device sits out of its room's On/Off (a per-device setting in the My Leviton app) |
 
 Click a device to toggle it; drag a dimmer's slider and the light is set when you let go (and
 switched on, if it was off). An off dimmer reads 0 % with its slider at the bottom, as in the
-My Leviton app, and dragging a slider to 0 turns the light off. Click a **room** to switch it the way the My Leviton app does —
-the server flips the devices that opt in to room On/Off and leaves the ringed ones alone; the
-room row shows `2 of 3 on`. A room with a dimmer in it gets a slider of its own — as does All
-Devices — which sets every reachable dimmer in that room (or the whole home) to one level; it
-shows the average level of the ones that are on, and 0 switches them all off.
+My Leviton app, and dragging a slider to 0 turns the light off. Click a **room** to switch it
+the way the My Leviton app does — through My Leviton's own room switch, which moves every
+device in the room; the room row shows `2 of 3 on`. A room with a dimmer in it gets a slider
+of its own — as does All Devices — which sets every reachable dimmer in that room (or the
+whole home) to one level; it shows the average level of the ones that are on, and 0 switches
+them all off.
 
 None of these clicks close the menu, so you can set up a room in one visit. A row flips the
 moment you click it and the request follows; if My Leviton says no, the row snaps back and the

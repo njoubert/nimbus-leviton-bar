@@ -33,7 +33,7 @@ already found.
 ```
 Sources/NimbusLevitonBar/
   main.swift              flag parsing, AppDelegate, the hidden Edit menu, Login Item registration
-  CLI.swift               --login / --logout / --print / --set / --watch / --get (same client, no UI)
+  CLI.swift               --login / --logout / --print / --set / --room / --watch / --get / --put
   LevitonClient.swift     REST: login, residences, devices, update, logout; error mapping
   LevitonRealtime.swift   the websocket: token → ready → subscribe → notifications; reconnect
   DeviceStore.swift       @MainActor state: sign-in, devices, optimistic writes, 60 s poll
@@ -68,8 +68,10 @@ queue, which `DeviceStore` enters with `MainActor.assumeIsolated`. `LevitonClien
 .build/debug/NimbusLevitonBar --login EMAIL   password from the prompt or $MYLEVITON_PASSWORD
 .build/debug/NimbusLevitonBar --print         residences + devices (the data path, no UI)
 .build/debug/NimbusLevitonBar --set NAME on|off|N
+.build/debug/NimbusLevitonBar --room NAME on|off   My Leviton's room switch, before/after listing
 .build/debug/NimbusLevitonBar --watch         realtime frames to stderr (token redacted)
 .build/debug/NimbusLevitonBar --get PATH      raw GET, pretty-printed (poking at new endpoints)
+.build/debug/NimbusLevitonBar --put PATH JSON raw PUT (record fields the app never writes)
 .build/debug/NimbusLevitonBar --dump-menu P   the rows with sample data → PNG, light and dark
 ```
 
@@ -124,11 +126,20 @@ update) apply.
 - **Rooms:** `Residences/{id}/residentialRooms` → `{id, name, power, allConnected}`, in the
   app's order (`position` is null on every room). Devices carry `residentialRoomId` and
   `includeInRoomOnOff`. Room switching is `POST /api/ResidentialRooms/turnOn?id=N` (or
-  `turnOff`), what the web app calls — the server flips only the opted-in devices. On this
-  account 12 of 16 devices are *not* opted in (all of Alcove, all of Dining Room), so a room
-  click there does nothing — by the owner's choice the app mirrors My Leviton rather than
-  overriding. The room's `power` is "any device on" regardless of the flag (Alcove: ON with no
-  opted-in device); the store recomputes it locally from the devices.
+  `turnOff`), what the web app calls — **the server moves every device in the room and ignores
+  `includeInRoomOnOff`.** Measured 2026-08-22 with `--room Alcove on`: all three Alcove
+  devices are opted *out* and all three came on (and `--room Alcove off` put them back). The
+  web bundle agrees — `includeInRoomOnOff` is only a model getter/setter there, nothing reads
+  it, and Leviton's own demo-mode stand-in for `turnOn` does `updateAllSwitchesInRoom(id,
+  "ON")`, unfiltered. So the flag is dead server-side; the app shows no sign of it (it is
+  still parsed and `--print` dumps `includeInRoomOnOff=false` as a tripwire). On 2026-08-22,
+  after that test, the owner had all 12 opted-out devices set back to `true`
+  (`--put IotSwitches/{id} '{"includeInRoomOnOff":true}'`, which touches nothing else), so the
+  account now reads all-`true` and re-testing the server's behaviour means setting one `false`
+  first. The room's `power` is "any device on"; the store recomputes it locally from the
+  devices.
+  Timestamps are no help in forensics here: every device's `lastUpdated` bumps on a periodic
+  cloud sync (all of them at once), and a redundant PUT bumps it too.
 - **Realtime:** `wss://my.leviton.com/socket/websocket` with `Origin: https://my.leviton.com`.
   Send `{"token": {id, userId, ttl, created, rememberMe}}` on open *and again on the
   `challenge` frame* (the nonce is ignored by every client); wait for

@@ -220,7 +220,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         row.set(dot: dot, name: "All Devices", detail: store.tally, enabled: store.devicesReachable > 0, devices: store.devices)
         row.toolTip = store.summary + "\n"
             + (store.devicesReachable == 0 ? "Nothing is reachable right now"
-               : "Click to turn every reachable device \(store.devicesOn > 0 ? "off" : "on") — whatever its room settings say; the slider sets every reachable dimmer")
+               : "Click to turn everything \(store.devicesOn > 0 ? "off" : "on")\nThe slider sets every dimmer in the home")
             + (store.lastError.map { "\n⚠︎ \($0)" } ?? "")
     }
 

@@ -10,8 +10,10 @@ enum CLI {
         case logout
         case print
         case set(device: String, value: String)
+        case room(room: String, value: String)
         case watch
         case get(path: String)
+        case put(path: String, json: String)
     }
 
     static func run(_ cmd: Command) -> Int32 {
@@ -80,12 +82,50 @@ enum CLI {
                 let echo = try block { try await client.update(s, deviceId: d.id, fields: fields) }
                 Swift.print("\(d.name): power=\(echo.power.map { $0 ? "ON" : "OFF" } ?? "?") brightness=\(echo.brightness.map(String.init) ?? "?")")
 
+            case .room(let which, let value):
+                // My Leviton's own room switch, for checking what the server does with it.
+                let s = try session(client)
+                let residences = try block { try await client.residences(s) }
+                var found: (Residence, Room)?
+                for r in residences {
+                    let rooms = try block { try await client.rooms(s, residenceId: r.id) }
+                    let ds = try block { try await client.devices(s, residenceId: r.id) }
+                    if let room = rooms.first(where: { $0.id == which || $0.name.caseInsensitiveCompare(which) == .orderedSame }) {
+                        found = (Residence(id: r.id, name: r.name, rooms: rooms, devices: ds), room)
+                        break
+                    }
+                }
+                guard let (res, room) = found else { fputs("no room named or numbered \(which)\n", stderr); return 1 }
+                guard let on = ["on": true, "off": false][value.lowercased()] else {
+                    fputs("value must be on or off\n", stderr); return 2
+                }
+                Swift.print("\(room.name)  [room \(room.id)] before:")
+                for d in res.displayDevices(in: room) { Swift.print("    " + describe(d)) }
+                try block { try await client.setRoomPower(s, roomId: room.id, on: on) }
+                Thread.sleep(forTimeInterval: 2)
+                let after = try block { try await client.devices(s, residenceId: res.id) }
+                Swift.print("after turn\(on ? "On" : "Off"):")
+                for d in after.filter({ $0.roomId == room.id }).sorted(by: { $0.name < $1.name }) {
+                    Swift.print("    " + describe(d))
+                }
+
             case .get(let path):
                 // Raw GET, pretty-printed: for poking at endpoints the app does not use yet.
                 let s = try session(client)
                 let json = try block { try await client.rawGet(s, path) }
                 let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
                 Swift.print(String(decoding: data, as: UTF8.self))
+
+            case .put(let path, let json):
+                // Raw PUT: a JSON object on the command line, the server's reply back.
+                let s = try session(client)
+                guard let data = json.data(using: .utf8),
+                      let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    fputs("--put needs a JSON object, e.g. '{\"includeInRoomOnOff\":true}'\n", stderr); return 2
+                }
+                let reply = try block { try await client.rawPut(s, path, body: body) }
+                let out = try JSONSerialization.data(withJSONObject: reply, options: [.prettyPrinted, .sortedKeys])
+                Swift.print(String(decoding: out, as: UTF8.self))
 
             case .watch:
                 let s = try session(client)
@@ -126,7 +166,8 @@ enum CLI {
     static func describe(_ d: Device) -> String {
         let state = !d.connected ? "offline" : d.power ? "ON " : "off"
         let level = d.canSetLevel ? String(format: " %3d%% (%d–%d)", d.brightness, d.minLevel, d.maxLevel) : ""
-        let room = d.includeInRoomOnOff ? "" : " not-in-room-on/off"
+        // The flag the server ignores on room On/Off — dumped so a change of heart is visible.
+        let room = d.includeInRoomOnOff ? "" : " includeInRoomOnOff=false"
         return "\(state)\(level.padding(toLength: 15, withPad: " ", startingAt: 0))  \(d.name)  [\(d.kind.rawValue) \(d.model) \(d.serial) id=\(d.id)\(room)]"
     }
 

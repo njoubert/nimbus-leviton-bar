@@ -275,16 +275,18 @@ final class DeviceStore {
         send(id: id, before: before, fields: .init(power: on))
     }
 
-    /// The room switch, My Leviton's way: the server flips the devices that opt in
-    /// (`includeInRoomOnOff`), so that is what the optimistic update flips too. A refresh
-    /// follows shortly to pick up whatever the server actually did (levels, stragglers).
+    /// The room switch, My Leviton's way: `turnOn`/`turnOff` moves *every* device in the room.
+    /// The per-device `includeInRoomOnOff` flag plays no part — the server ignores it (checked
+    /// against this account on 2026-08-22: a `turnOn` on a room where all three devices are
+    /// opted out switched all three on), and My Leviton's own web app never reads it either.
+    /// A refresh follows shortly to pick up whatever the server actually did (levels, stragglers).
     func toggleRoom(_ roomId: String) {
         guard let s = session, let ri = residences.firstIndex(where: { $0.rooms.contains { $0.id == roomId } }),
               let room = residences[ri].rooms.first(where: { $0.id == roomId }) else { return }
         let on = !room.power
         let before = residences[ri]
         for di in residences[ri].devices.indices where residences[ri].devices[di].roomId == roomId
-            && residences[ri].devices[di].includeInRoomOnOff && residences[ri].devices[di].connected {
+            && residences[ri].devices[di].connected {
             residences[ri].devices[di].power = on
         }
         Self.recomputeRooms(&residences[ri])
@@ -327,8 +329,7 @@ final class DeviceStore {
     }
 
     /// The room's (or, with nil, the home's) slider: every reachable dimmer to one level —
-    /// each floored at its own minLevel; 0 switches them all off. Our feature, not My
-    /// Leviton's, so `includeInRoomOnOff` plays no part.
+    /// each floored at its own minLevel; 0 switches them all off. Our feature, not My Leviton's.
     func setBrightness(ofAll roomId: String?, _ level: Int) {
         for d in devices where d.canSetLevel && d.connected && (roomId == nil || d.roomId == roomId) {
             setBrightness(d.id, level)

@@ -97,9 +97,8 @@ class MenuRow: NSView {
 
     enum Dot { case on, off, offline }
 
-    /// A 10 pt disc: green for on, hollow grey for off, dim red for unreachable. `ringed`
-    /// adds a thin outer ring — the mark for a device that sits out of its room's On/Off.
-    static func dotImage(_ dot: Dot, ringed: Bool = false) -> NSImage {
+    /// A 10 pt disc: green for on, hollow grey for off, dim red for unreachable.
+    static func dotImage(_ dot: Dot) -> NSImage {
         let size = NSSize(width: 14, height: 14)
         let img = NSImage(size: size, flipped: false) { _ in
             let r = NSRect(x: 2, y: 2, width: 10, height: 10)
@@ -108,12 +107,6 @@ class MenuRow: NSView {
             case .on: NSColor.systemGreen.setFill(); p.fill()
             case .off: NSColor.tertiaryLabelColor.setStroke(); p.lineWidth = 1.2; p.stroke()
             case .offline: NSColor.systemRed.withAlphaComponent(0.55).setFill(); p.fill()
-            }
-            if ringed {
-                let ring = NSBezierPath(ovalIn: NSRect(x: 0.5, y: 0.5, width: 13, height: 13))
-                ring.lineWidth = 0.8
-                NSColor.tertiaryLabelColor.setStroke()
-                ring.stroke()
             }
             return true
         }
@@ -237,16 +230,14 @@ final class DeviceRow: MenuRow {
     private func sync() {
         let d = device
         isEnabled = d.connected
-        dot.image = MenuRow.dotImage(!d.connected ? .offline : d.power ? .on : .off, ringed: !d.includeInRoomOnOff)
+        dot.image = MenuRow.dotImage(!d.connected ? .offline : d.power ? .on : .off)
         name.stringValue = d.connected ? d.name : "\(d.name)  —  offline"
         if let l = level {
             l.level = d.power ? d.levelClamped : 0
             l.isEnabled = d.connected
         }
-        var tip = "\(d.model) · \(d.serial)"
-        if !d.connected { tip += "\nNot reachable by My Leviton" } else { tip += "\nClick to turn \(d.power ? "off" : "on")" }
-        if !d.includeInRoomOnOff { tip += "\nNot included in the room's On/Off (a My Leviton setting)" }
-        toolTip = tip
+        toolTip = "\(d.model) · \(d.serial)\n"
+            + (d.connected ? "Click to turn \(d.power ? "off" : "on")" : "Not reachable by My Leviton")
         refreshAppearance()
     }
 
@@ -257,8 +248,8 @@ final class DeviceRow: MenuRow {
 }
 
 /// ● Room name   2 of 3 on ————slider———— 42%   — click to switch the room (My Leviton's
-/// room On/Off); the slider, present when the room has a dimmer, sets every reachable dimmer
-/// in it (0 = all off). Also used for the "All Devices" row at the top.
+/// room On/Off, which moves every device in the room); the slider, present when the room has
+/// a dimmer, sets every reachable dimmer in it (0 = all off). Also used for "All Devices".
 @MainActor
 final class RoomRow: MenuRow {
     private let dot = NSImageView()
@@ -305,10 +296,8 @@ final class RoomRow: MenuRow {
         let on = reachable.filter(\.power).count
         set(dot: reachable.isEmpty ? .offline : room.power ? .on : .off, name: room.name,
             detail: reachable.isEmpty ? "offline" : "\(on) of \(reachable.count) on", enabled: !reachable.isEmpty, devices: devices)
-        let included = devices.filter(\.includeInRoomOnOff).count
-        toolTip = "Click to turn the room \(room.power ? "off" : "on") — My Leviton's room switch, "
-            + "which moves \(included) of the \(devices.count) device\(devices.count == 1 ? "" : "s") here (the ringed ones sit it out)."
-            + (level != nil ? "\nThe slider sets every reachable dimmer in the room." : "")
+        toolTip = "Click to turn the whole room \(room.power ? "off" : "on")"
+            + (level != nil ? "\nThe slider sets every dimmer in it" : "")
     }
 
     /// The same row for something that is not a room (All Devices). The slider, if any,
@@ -379,12 +368,12 @@ final class TextRow: MenuRow {
 @MainActor
 enum MenuRowPreview {
     static func write(to path: String) -> Bool {
-        func device(_ name: String, on: Bool, level: Int = 100, dim: Bool = true, connected: Bool = true, inRoom: Bool = true) -> Device {
+        func device(_ name: String, on: Bool, level: Int = 100, dim: Bool = true, connected: Bool = true) -> Device {
             Device(id: name, residenceId: "1", roomId: "r", name: name, model: dim ? "DW3HL" : "DW15P", serial: "1000_0000_0000",
-                   power: on, brightness: level, minLevel: 10, maxLevel: 100, canSetLevel: dim, connected: connected, includeInRoomOnOff: inRoom)
+                   power: on, brightness: level, minLevel: 10, maxLevel: 100, canSetLevel: dim, connected: connected, includeInRoomOnOff: true)
         }
-        let devices = [device("Desk", on: true, level: 100), device("Nightstand", on: false, level: 40, inRoom: false),
-                       device("Bookcase", on: false, dim: false), device("760 Fridge", on: false, dim: false, connected: false, inRoom: false),
+        let devices = [device("Desk", on: true, level: 100), device("Nightstand", on: false, level: 40),
+                       device("Bookcase", on: false, dim: false), device("760 Fridge", on: false, dim: false, connected: false),
                        device("A very long lamp name that truncates", on: true, level: 73)]
         let room = Room(id: "r", name: "Niels' Room", power: true)
 
