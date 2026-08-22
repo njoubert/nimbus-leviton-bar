@@ -197,7 +197,10 @@ update) apply.
 
 ## Release and distribution
 
-Same as net-bar: `VERSION=` in `build.sh`, `CFBundleVersion` = commit count, `./build.sh dmg`,
+Repo: https://github.com/njoubert/nimbus-leviton-bar — releases carry the notarized DMG
+(1.0.0 shipped 2026-08-21). Same as net-bar: `VERSION=` in `build.sh`, `CFBundleVersion` = commit count, `./build.sh dmg`,
 check the mounted image by eye, tag `v<VERSION>`, `gh release create`. Signing/notarization
 read `SIGN_IDENTITY` / `NOTARY_PROFILE` from a git-ignored `.signing` (the notary profile is
-per Apple ID, shared across projects). Unsigned builds need "Open Anyway" when quarantined.
+per Apple ID, shared across projects). Unsigned builds need "Open Anyway" when quarantined. The release binary is arm64 only (plain
+`swift build`); the installed copy in /Applications is `ditto`ed out of the DMG, not
+`build.sh install`, so it is the exact stapled artifact.
