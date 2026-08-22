@@ -100,6 +100,8 @@ queue, which `DeviceStore` enters with `MainActor.assumeIsolated`. `LevitonClien
 .build/debug/NimbusLevitonBar --watch         realtime frames to stderr (token redacted)
 .build/debug/NimbusLevitonBar --get PATH      raw GET, pretty-printed (poking at new endpoints)
 .build/debug/NimbusLevitonBar --put PATH JSON raw PUT (record fields the app never writes)
+.build/debug/NimbusLevitonBar --scenes        the Activities and what each one sets
+.build/debug/NimbusLevitonBar --scene NAME    run one Activity
 .build/debug/NimbusLevitonBar --dump-menu P   the rows with sample data → PNG, light and dark
 .build/debug/NimbusLevitonBar --dump-internals P  the Internals panel with sample data → PNG
 .build/debug/NimbusLevitonBar --check-update  the release feed as the updater reads it
@@ -246,8 +248,20 @@ update) apply.
     room), `$unassignedRoomIotSwitches`, `$activitySortOrder`, `$scenes$`. This account has
     exactly one `sorting$` row, so there is nothing to test the device case against — our own
     device order stays alphabetical.
-  - Only the *whole* preference list can be fetched: `--get` percent-encodes the path, so
-    `?filter=…` comes back `404 … has no method handling GET …%3Ffilter=…`. It is 24 rows.
+  - Only the *whole* preference list can be fetched from `--get`'s original form; it now
+    splits a `?a=b` tail into query items, so LoopBack `filter={…}` calls work from the CLI.
+    The list is 24 rows.
+- **Scenes are called Activities.** `Residences/{id}/residentialActivities` — whole-residence,
+  and `ResidentialRooms/{roomId}/residentialScenes` — per room (this account has 3 activities
+  and 0 room scenes). Both hang their contents off the same `residentialActions` join, and
+  both have an `execute`. One call gets the lot:
+  `Residences/{id}/residentialActivities?filter={"include":["residentialActions"]}`.
+  Run one with **`POST /api/ResidentialActivities/execute?id=N`** — no body, the id in the
+  query, exactly like `ResidentialRooms/turnOn`. Full CRUD exists too (`POST`/`PATCH`
+  `/ResidentialActivities[/{id}]`, `replaceOrCreate`, `upsertWithWhere`, `convertRoomAction`,
+  plus `sonosActions` / `schlageActions` / `onHome` / `onAway` per activity) — deliberately
+  not used; the My Leviton app owns editing. An activity has **no state**: running it is
+  fire-and-forget, so there is nothing to show back but its name.
 - **Realtime, and how much "live" is worth:** `wss://my.leviton.com/socket/websocket` with `Origin: https://my.leviton.com`.
   Send `{"token": {id, userId, ttl, created, rememberMe}}` on open *and again on the
   `challenge` frame* (the nonce is ignored by every client); wait for
@@ -438,6 +452,22 @@ websocket frame, and the app's own milestones. It exists because the alternative
   `installEditMenu()` provides one, which is why the status item is `menu bar 2` under AX.
 - **Optimistic writes snap back.** A failed PUT restores the row from the `before` snapshot and
   puts the reason in the status line; a 401 triggers a re-login with the saved password.
+- **A `residentialAction` has two shapes, both live on this account.** Usually
+  `targetProperty: "properties"` with `targetValue` a *JSON string* —
+  `"{\"power\":\"ON\",\"brightness\":40}"`, a string, so it needs a second parse. But
+  "Good Morning" carries `targetProperty: "power"`, `targetValue: "ON"` — a bare property with
+  the value unwrapped. `LevitonClient.sceneAction` handles both; a reader that only knows the
+  blob silently drops actions.
+- **Hide activities with `isButtonActivity`** — they belong to a 4-button controller, and the
+  web app's own list is `getNonButtonActivitiesForResidence()` (`!isButtonActivity`).
+  `position` is null on every activity, as on rooms: the API's listing order is the order.
+- **`customIcon` is one of 41 fixed names** (`all-on`, `goodnight`, `party`, `movie`…) but
+  owners pick them freely — on this account "Good Morning" is `dinner` and "I'm Home" is
+  `away`. Drawing a glyph from it would be worse than drawing none.
+- **`execute` does push realtime frames** (verified 2026-08-22): each action arrived as an
+  IotSwitch `saved` notification within 1–3 s, in two waves — the cloud write, then the
+  device's confirmation. Offline devices get a cloud-side frame too (the offline `760 Fridge`
+  reported `power: OFF`), so a scene "succeeds" whether or not the hardware heard it.
 - **`--dump-bar` is useless for a template image** (white glyph on transparent); read the
   bar through accessibility instead.
 - **`getpass` needs a tty**; `script -q /dev/null` did not help — use `MYLEVITON_PASSWORD`

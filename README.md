@@ -59,6 +59,14 @@ so a room of dim lights with one bright one in it doesn't read as bright, and a 
 can't blast the room — and a lighter band carries on from the knob to the highest, so you can
 still see how far up the rest of the room goes. 0 switches them all off.
 
+**Scenes** sit in their own section under All Devices — what the My Leviton app calls
+**Activities**: a saved set of devices and levels ("Evening Glow", "Good Morning"). Click one
+and it runs, exactly as the app or a Leviton button would run it; hover it to see what it
+sets. They are read-only here — create and edit them in the My Leviton app. A scene has no
+state of its own, so its row shows no dot and no tally; what changes is the device rows under
+it, which move the moment you click and are confirmed a second later. An account with no
+Activities gets no section.
+
 None of these clicks close the menu, so you can set up a room in one visit. A row flips the
 moment you click it and the request follows; if My Leviton says no, the row snaps back and the
 reason shows in the status line. Turning a dimmer on sends no level, so the dimmer's own rule
@@ -161,6 +169,8 @@ for checking what the account returns):
 .build/debug/NimbusLevitonBar --print                   # residences and devices, as text
 .build/debug/NimbusLevitonBar --set "Kitchen" 40        # a name or an id; on | off | 0–100
 .build/debug/NimbusLevitonBar --watch                   # print realtime updates as they arrive
+.build/debug/NimbusLevitonBar --scenes                   # the Activities and what each one sets
+.build/debug/NimbusLevitonBar --scene "Evening Glow"    # run one
 .build/debug/NimbusLevitonBar --get Residences/1/residentialRooms   # any GET, pretty-printed
 .build/debug/NimbusLevitonBar --check-update              # what the updater sees on GitHub
 .build/debug/NimbusLevitonBar --logout
