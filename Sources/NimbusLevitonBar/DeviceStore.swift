@@ -60,6 +60,8 @@ final class DeviceStore {
     static let openRefreshMinAge: TimeInterval = 3
 
     var devices: [Device] { residences.flatMap(\.devices) }
+    /// Every residence's scenes, in the API's order. Used for the menu's scene section.
+    var activities: [Activity] { residences.flatMap(\.activities) }
     var devicesOn: Int { devices.filter(\.isOn).count }
     var devicesReachable: Int { devices.filter(\.connected).count }
     var devicesOffline: Int { devices.count - devicesReachable }
@@ -196,9 +198,10 @@ final class DeviceStore {
                     do {
                         async let rooms = client.rooms(s, residenceId: r.id)
                         async let ds = client.devices(s, residenceId: r.id)
+                        async let acts = self.activitiesOrNone(s, residenceId: r.id)
                         let sorted = try await ds.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
                         var res = Residence(id: r.id, name: r.name, rooms: try await rooms, devices: sorted,
-                                            roomOrder: orders[r.id] ?? [])
+                                            roomOrder: orders[r.id] ?? [], activities: await acts)
                         Self.recomputeRooms(&res)
                         out.append(res)
                     } catch LevitonClient.Error.unauthorized {
@@ -229,6 +232,13 @@ final class DeviceStore {
                 notify()
             }
         }
+    }
+
+    /// Scenes must never cost us the device list: if the fetch fails, the section is simply
+    /// absent this round. A token that is really dead fails the device fetch too, which is
+    /// what raises the 401.
+    private nonisolated func activitiesOrNone(_ s: Keychain.Session, residenceId: String) async -> [Activity] {
+        (try? await client.activities(s, residenceId: residenceId)) ?? []
     }
 
     /// The menu's Retry: sign in again if there is no session (a failed sign-in leaves none),
@@ -444,6 +454,45 @@ final class DeviceStore {
             } catch {
                 if let i = residences.firstIndex(where: { $0.id == before.id }) { residences[i] = before }
                 lastError = "\(room.name): \(Self.describe(error))"
+                notify()
+                if case LevitonClient.Error.unauthorized = error { refresh() }
+            }
+        }
+    }
+
+    /// Run a scene: `ResidentialActivities/execute`, one POST for the whole thing. The reply
+    /// carries no device state, so the rows are painted from the scene's own actions — we know
+    /// exactly what it asked for. Each action is applied as stored (a power-only action leaves
+    /// the level alone), which is what the server does with it.
+    ///
+    /// Realtime confirms within a second or two and overwrites the guess; the delayed refresh
+    /// is the backstop for a dropped socket. Offline devices are painted too — My Leviton
+    /// changes their cloud record regardless, and their row shows "offline" either way.
+    func runActivity(_ id: String) {
+        guard let s = session,
+              let ri = residences.firstIndex(where: { $0.activities.contains { $0.id == id } }),
+              let activity = residences[ri].activities.first(where: { $0.id == id }) else { return }
+        let before = residences[ri]
+        for action in activity.actions {
+            guard let di = residences[ri].devices.firstIndex(where: { $0.id == action.deviceId }) else { continue }
+            if let p = action.fields.power { residences[ri].devices[di].power = p }
+            if let b = action.fields.brightness {
+                let d = residences[ri].devices[di]
+                residences[ri].devices[di].brightness = min(max(b, d.minLevel), d.maxLevel)
+            }
+        }
+        Self.recomputeRooms(&residences[ri])
+        notify()
+        Task {
+            do {
+                try await client.executeActivity(s, id: id)
+                lastError = nil
+                notify()
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                refresh()
+            } catch {
+                if let i = residences.firstIndex(where: { $0.id == before.id }) { residences[i] = before }
+                lastError = "\(activity.name): \(Self.describe(error))"
                 notify()
                 if case LevitonClient.Error.unauthorized = error { refresh() }
             }

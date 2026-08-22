@@ -448,10 +448,11 @@ enum MenuRowPreview {
         all.set(dot: .on, name: "All Devices", detail: "6 of 13 on", enabled: true, devices: devices)
         let allBad = RoomRow(dimmers: false, toggle: {})
         allBad.set(dot: .offline, name: "All Devices", detail: "all offline", enabled: false, devices: [])
+        let scene = TextRow {}; scene.set("Evening Glow")            // a scene row: name only, no state
         let status = TextRow {}; status.set("Refresh", detail: "live")
         let polled = TextRow {}; polled.set("Refresh", detail: "updated 47 seconds ago")
         let warn = TextRow {}; warn.set("Refresh", detail: "⚠︎ Desk: my.leviton.com timed out", warning: true)
-        rows += [all, allBad, status, polled, warn]
+        rows += [all, allBad, scene, status, polled, warn]
         // Rows stacked top to bottom by frame, as the menu does it.
         let stack = NSView(frame: NSRect(x: 0, y: 0, width: MenuRow.width, height: MenuRow.height * CGFloat(rows.count)))
         for (i, r) in rows.enumerated() {
