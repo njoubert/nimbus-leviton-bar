@@ -47,7 +47,9 @@ Sources/NimbusLevitonBar/
   AppIcon.swift           the icon (a backlit Decora paddle), drawn in code → .icns at bundle time
   DMGBackground.swift     the disk image's background, drawn in code
 build.sh                  build / run / stop / app / dmg / install / uninstall / status / icon / clean
-docs/icon.png             re-rendered by `build.sh icon`; screenshot.png is taken by hand
+docs/icon.png             re-rendered by `build.sh icon`; screenshot.png is taken by hand (open the
+                          menu, ⇧⌘4, space, click it), then cropped to the menu and the other
+                          menu bar icons painted over with the bar's clean background strip
 dist/                     build products (gitignored)
 ```
 
