@@ -1,0 +1,75 @@
+// Copyright (C) 2026 Niels Joubert
+// SPDX-License-Identifier: GPL-3.0-or-later
+import Foundation
+
+/// One Decora Smart Wi-Fi device as the menu sees it — the subset of an `IotSwitch`
+/// record that matters for showing and controlling it.
+struct Device: Identifiable, Equatable {
+    enum Kind: String { case dimmer, `switch`, fan, plug, other }
+
+    let id: String           // IotSwitch id (numeric on the wire; kept as a string)
+    var residenceId: String
+    var roomId: String?      // residentialRoomId; nil when My Leviton has it in no room
+    var name: String
+    var model: String        // e.g. DW6HD, D26HD, DW15S, DW4SF, DW15P
+    var serial: String
+    var power: Bool
+    /// 0–100; only meaningful when `canSetLevel` (dimmers and fan controllers).
+    var brightness: Int
+    var minLevel: Int
+    var maxLevel: Int
+    var canSetLevel: Bool
+    /// False when the switch has dropped off Wi-Fi: My Leviton still lists it, commands fail.
+    var connected: Bool
+    /// My Leviton's per-device setting: does the room's On/Off include this device?
+    var includeInRoomOnOff: Bool
+
+    /// For display only; `canSetLevel` is what decides whether a slider is shown.
+    var kind: Kind {
+        if model.hasSuffix("SF") { return .fan }              // DW4SF, D24SF: 4-speed fan controller
+        if canSetLevel { return .dimmer }                     // DW6HD, D26HD, DW3HL, D23LP (plug-in dimmer)…
+        if model.hasSuffix("P") || model.hasSuffix("A") || model.hasSuffix("R") || model.hasSuffix("O") { return .plug }   // DW15P, D215P, DW15A, DW15R, D215O
+        if model.hasSuffix("S") { return .switch }            // DW15S, D215S
+        return .other
+    }
+
+    var isOn: Bool { connected && power }
+    var levelClamped: Int { min(max(brightness, minLevel), maxLevel) }
+}
+
+/// A My Leviton room. Its devices are the ones whose `roomId` matches; `power` is the
+/// server's view (any device on) and is recomputed locally from the devices.
+struct Room: Identifiable, Equatable {
+    let id: String
+    var name: String
+    var power: Bool
+}
+
+struct Residence: Identifiable, Equatable {
+    let id: String
+    var name: String
+    /// In the order My Leviton returns them (the app's own order).
+    var rooms: [Room]
+    var devices: [Device]
+
+    func devices(in room: Room) -> [Device] { devices.filter { $0.roomId == room.id } }
+
+    /// The menu's order: rooms as My Leviton lists them, minus the ones with no device, and
+    /// with rooms whose every device is unreachable moved to the end (stable).
+    var displayRooms: [Room] {
+        let live = rooms.filter { !devices(in: $0).isEmpty }
+        return live.filter { devices(in: $0).contains(where: \.connected) } + live.filter { !devices(in: $0).contains(where: \.connected) }
+    }
+
+    /// The menu's order within a room: reachable devices first, unreachable ones last (each
+    /// group alphabetical, which is how `devices` is already sorted).
+    func displayDevices(in room: Room) -> [Device] {
+        let all = devices(in: room)
+        return all.filter(\.connected) + all.filter { !$0.connected }
+    }
+    /// Devices My Leviton has in no room (or a room it didn't list).
+    var unassigned: [Device] {
+        let ids = Set(rooms.map(\.id))
+        return devices.filter { $0.roomId.map { !ids.contains($0) } ?? true }
+    }
+}

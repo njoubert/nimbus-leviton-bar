@@ -1,0 +1,160 @@
+// Copyright (C) 2026 Niels Joubert
+// SPDX-License-Identifier: GPL-3.0-or-later
+import Foundation
+
+/// The command-line face of the client: the same Keychain login and the same requests as the
+/// menu, minus the UI. The quickest way to check the data path against the real account.
+enum CLI {
+    enum Command {
+        case login(email: String)
+        case logout
+        case print
+        case set(device: String, value: String)
+        case watch
+        case get(path: String)
+    }
+
+    static func run(_ cmd: Command) -> Int32 {
+        let client = LevitonClient()
+        do {
+            switch cmd {
+            case .login(let email):
+                // MYLEVITON_PASSWORD in the environment skips the prompt (scripts, tests).
+                let password = ProcessInfo.processInfo.environment["MYLEVITON_PASSWORD"]
+                    ?? readPassword("My Leviton password for \(email): ")
+                guard let password, !password.isEmpty else {
+                    fputs("no password given\n", stderr); return 2
+                }
+                let s = try block { try await client.login(email: email, password: password) }
+                try Keychain.saveLogin(.init(email: email, password: password))
+                try Keychain.saveSession(s)
+                Swift.print("signed in as user \(s.userId); login and session saved to the Keychain")
+                if let e = s.expiry { Swift.print("session expires \(e)") }
+
+            case .logout:
+                if let s = Keychain.loadSession() { block { await client.logout(s) } }
+                Keychain.deleteSession()
+                Keychain.deleteLogin()
+                Swift.print("signed out; Keychain entries removed")
+
+            case .print:
+                let s = try session(client)
+                for r in try block({ try await client.residences(s) }) {
+                    Swift.print("\(r.name)  [residence \(r.id)]")
+                    let ds = try block { try await client.devices(s, residenceId: r.id) }
+                        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                    let rooms = try block { try await client.rooms(s, residenceId: r.id) }
+                    let res = Residence(id: r.id, name: r.name, rooms: rooms, devices: ds)
+                    if ds.isEmpty { Swift.print("    (no devices)") }
+                    for room in res.displayRooms {
+                        let inRoom = res.displayDevices(in: room)
+                        Swift.print("  \(room.name)  [room \(room.id), \(room.power ? "ON" : "off"), \(inRoom.count) devices]")
+                        for d in inRoom { Swift.print("    " + describe(d)) }
+                    }
+                    let rest = res.unassigned
+                    if !rest.isEmpty { Swift.print("  (no room)"); for d in rest { Swift.print("    " + describe(d)) } }
+                }
+
+            case .set(let which, let value):
+                let s = try session(client)
+                let all = try block { () async throws -> [Device] in
+                    var out: [Device] = []
+                    for r in try await client.residences(s) { out += try await client.devices(s, residenceId: r.id) }
+                    return out
+                }
+                guard let d = all.first(where: { $0.id == which || $0.name.caseInsensitiveCompare(which) == .orderedSame }) else {
+                    fputs("no device named or numbered \(which); have: \(all.map(\.name).joined(separator: ", "))\n", stderr)
+                    return 1
+                }
+                let fields: LevitonClient.DeviceFields
+                switch value.lowercased() {
+                case "on": fields = .init(power: true)
+                case "off": fields = .init(power: false)
+                default:
+                    guard let n = Int(value.replacingOccurrences(of: "%", with: "")), (0...100).contains(n) else {
+                        fputs("value must be on, off, or 0–100\n", stderr); return 2
+                    }
+                    guard d.canSetLevel else { fputs("\(d.name) (\(d.model)) has no level to set\n", stderr); return 1 }
+                    fields = n == 0 ? .init(power: false) : .init(power: true, brightness: max(n, d.minLevel))
+                }
+                let echo = try block { try await client.update(s, deviceId: d.id, fields: fields) }
+                Swift.print("\(d.name): power=\(echo.power.map { $0 ? "ON" : "OFF" } ?? "?") brightness=\(echo.brightness.map(String.init) ?? "?")")
+
+            case .get(let path):
+                // Raw GET, pretty-printed: for poking at endpoints the app does not use yet.
+                let s = try session(client)
+                let json = try block { try await client.rawGet(s, path) }
+                let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+                Swift.print(String(decoding: data, as: UTF8.self))
+
+            case .watch:
+                let s = try session(client)
+                let all = try block { () async throws -> [Device] in
+                    var out: [Device] = []
+                    for r in try await client.residences(s) { out += try await client.devices(s, residenceId: r.id) }
+                    return out
+                }
+                let names = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0.name) })
+                let rt = LevitonRealtime(session: s, deviceIds: all.map(\.id))
+                rt.verbose = true
+                rt.onUpdate = { id, f in
+                    Swift.print("\(names[id] ?? id): \(f)")
+                }
+                rt.start()
+                Swift.print("watching \(all.count) devices — Ctrl-C to stop")
+                RunLoop.main.run()
+            }
+            return 0
+        } catch {
+            fputs("error: \(DeviceStore.describe(error))\n", stderr)
+            return 1
+        }
+    }
+
+    /// The saved session, or a fresh one from the saved password. Tells the user what to do
+    /// when there is neither.
+    private static func session(_ client: LevitonClient) throws -> Keychain.Session {
+        if let s = Keychain.loadSession(), s.isFresh { return s }
+        guard let login = Keychain.loadLogin() else {
+            throw LevitonClient.Error.message("not signed in — run with --login EMAIL first")
+        }
+        let s = try block { try await client.login(email: login.email, password: login.password) }
+        try? Keychain.saveSession(s)
+        return s
+    }
+
+    static func describe(_ d: Device) -> String {
+        let state = !d.connected ? "offline" : d.power ? "ON " : "off"
+        let level = d.canSetLevel ? String(format: " %3d%% (%d–%d)", d.brightness, d.minLevel, d.maxLevel) : ""
+        let room = d.includeInRoomOnOff ? "" : " not-in-room-on/off"
+        return "\(state)\(level.padding(toLength: 15, withPad: " ", startingAt: 0))  \(d.name)  [\(d.kind.rawValue) \(d.model) \(d.serial) id=\(d.id)\(room)]"
+    }
+
+    /// Run an async call to completion from synchronous top-level code.
+    @discardableResult
+    static func block<T: Sendable>(_ body: @escaping @Sendable () async throws -> T) throws -> T {
+        let sem = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var result: Result<T, Swift.Error>?
+        Task.detached {
+            result = await Result { try await body() }
+            sem.signal()
+        }
+        sem.wait()
+        return try result!.get()
+    }
+
+    static func block<T: Sendable>(_ body: @escaping @Sendable () async -> T) -> T {
+        try! block { () async throws -> T in await body() }
+    }
+
+    private static func readPassword(_ prompt: String) -> String? {
+        guard let raw = getpass(prompt) else { return nil }
+        return String(cString: raw)
+    }
+}
+
+extension Result where Failure == Swift.Error {
+    init(catching body: () async throws -> Success) async {
+        do { self = .success(try await body()) } catch { self = .failure(error) }
+    }
+}
