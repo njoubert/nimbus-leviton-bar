@@ -185,6 +185,12 @@ update) apply.
   slider runs 0…maxLevel, not minLevel…maxLevel: 0 is "off" (shown for any off dimmer, and
   dragging there sends `power: OFF` only, keeping the remembered level), anything above 0 is
   floored at `minLevel`.
+- **Shadow offset and blur are in base space.** `CGContext.setShadow` ignores the CTM, so a
+  blur sized for the 1024-pt reference canvas is that many *device pixels* at every render
+  size — at the 128-pt icon the body shadow ran off the bottom edge and was clipped to a hard
+  line (the DMG window showed it). Every `setShadow` in `AppIcon` multiplies by `scale`
+  (= size / 1024). After touching the icon, check the edge alpha is 0 at 256 px as well as
+  1024 px — the scratch `edge.swift` trick: read back the bitmap's outermost rows/columns.
 - **Plain items' text starts 24 pt in, not 14** — the menu has a state column because
   "Launch at Login" has a checkmark. `MenuRow.textInset` matches it; measure against a real
   plain item after touching the layout (screenshot at 2× → halve the pixel offset).
@@ -203,7 +209,7 @@ update) apply.
 ## Release and distribution
 
 Repo: https://github.com/njoubert/nimbus-leviton-bar — releases carry the notarized DMG
-(1.0.0 and 1.1.0 shipped 2026-08-21). Same as net-bar: `VERSION=` in `build.sh`, `CFBundleVersion` = commit count, `./build.sh dmg`,
+(1.0.0, 1.1.0 and 1.1.1 shipped 2026-08-21). Same as net-bar: `VERSION=` in `build.sh`, `CFBundleVersion` = commit count, `./build.sh dmg`,
 check the mounted image by eye, tag `v<VERSION>`, `gh release create`. Signing/notarization
 read `SIGN_IDENTITY` / `NOTARY_PROFILE` from a git-ignored `.signing` (the notary profile is
 per Apple ID, shared across projects). Unsigned builds need "Open Anyway" when quarantined. The release binary is arm64 only (plain

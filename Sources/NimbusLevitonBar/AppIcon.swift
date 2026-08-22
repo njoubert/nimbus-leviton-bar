@@ -21,9 +21,17 @@ enum AppIcon {
     private static let paddleShade = rgb(0xC9, 0xC4, 0xB8)
     private static let led = rgb(0x5C, 0xE0, 0x8C)
 
+    /// The scale of the current render: shadow offsets and blurs are in *base* space (Core
+    /// Graphics does not transform them with the CTM), so every `setShadow` below multiplies
+    /// by this — otherwise a 28-pt blur meant for the 1024 canvas is 28 device pixels at
+    /// every size, which at the 128-pt icon is a quarter of the inset and gets clipped at the
+    /// bottom edge into a hard line.
+    nonisolated(unsafe) private static var scale: CGFloat = 1
+
     static func draw(in ctx: CGContext, size: CGFloat) {
         ctx.saveGState()
-        ctx.scaleBy(x: size / ref, y: size / ref)
+        scale = size / ref
+        ctx.scaleBy(x: scale, y: scale)
 
         let body = CGRect(x: bodyInset, y: bodyInset, width: ref - 2 * bodyInset, height: ref - 2 * bodyInset)
         let shape = CGPath(roundedRect: body, cornerWidth: bodyRadius, cornerHeight: bodyRadius, transform: nil)
@@ -32,7 +40,7 @@ enum AppIcon {
         // canvas: a shadow still visible at the edge is clipped to a hard line, which shows
         // as a grey box on light backgrounds (e.g. the disk image window).
         ctx.saveGState()
-        ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28,
+        ctx.setShadow(offset: CGSize(width: 0, height: -12 * scale), blur: 28 * scale,
                       color: NSColor(calibratedWhite: 0, alpha: 0.45).cgColor)
         ctx.addPath(shape); ctx.setFillColor(NSColor.black.cgColor); ctx.fillPath()
         ctx.restoreGState()
@@ -71,13 +79,13 @@ enum AppIcon {
         // light, drawn twice so the halo is bright at the edge and still reaches outwards.
         for (blur, alpha) in [(CGFloat(120), CGFloat(0.9)), (CGFloat(46), CGFloat(1.0))] {
             ctx.saveGState()
-            ctx.setShadow(offset: .zero, blur: blur, color: warm.copy(alpha: alpha))
+            ctx.setShadow(offset: .zero, blur: blur * scale, color: warm.copy(alpha: alpha))
             ctx.addPath(plateShape); ctx.setFillColor(warm); ctx.fillPath()
             ctx.restoreGState()
         }
         // And the plate's own shadow onto the body, below.
         ctx.saveGState()
-        ctx.setShadow(offset: CGSize(width: 0, height: -14), blur: 30, color: NSColor(calibratedWhite: 0, alpha: 0.35).cgColor)
+        ctx.setShadow(offset: CGSize(width: 0, height: -14 * scale), blur: 30 * scale, color: NSColor(calibratedWhite: 0, alpha: 0.35).cgColor)
         ctx.addPath(plateShape); ctx.setFillColor(paddle); ctx.fillPath()
         ctx.restoreGState()
 
@@ -107,7 +115,7 @@ enum AppIcon {
         // Status LED, glowing.
         let dot = CGRect(x: plate.minX + 52, y: plate.minY + 58, width: 30, height: 30)
         ctx.saveGState()
-        ctx.setShadow(offset: .zero, blur: 22, color: led.copy(alpha: 0.9))
+        ctx.setShadow(offset: .zero, blur: 22 * scale, color: led.copy(alpha: 0.9))
         ctx.setFillColor(led)
         ctx.fillEllipse(in: dot)
         ctx.restoreGState()
