@@ -358,8 +358,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             let alert = NSAlert()
             switch state {
             case .ready(let release):
+                // Offer it here rather than sending them back to the menu for it: the download
+                // is already on disk, and this is the same call the menu item makes.
                 alert.messageText = "Update \(release.version) is ready"
-                alert.informativeText = "Choose \u{201C}Install Update \(release.version) and Relaunch\u{201D} in the menu."
+                alert.informativeText = "It takes a couple of seconds and the app comes back where it was \u{2014} or install it later from the menu."
+                alert.addButton(withTitle: "Install and Relaunch")
+                alert.addButton(withTitle: "Later")
+                NSApp.activate(ignoringOtherApps: true)
+                if alert.runModal() == .alertFirstButtonReturn { updater.installAndRelaunch() }
+                return
             case .available(let release):
                 alert.messageText = "Version \(release.version) is available"
                 alert.informativeText = updater.canInstall
