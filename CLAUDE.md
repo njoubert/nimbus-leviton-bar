@@ -58,10 +58,13 @@ Sources/NimbusLevitonBar/
   LoginItem.swift         SMAppService wrapper (identical to net-bar's)
   AppIcon.swift           the icon (a backlit Decora paddle), drawn in code → .icns at bundle time
   DMGBackground.swift     the disk image's background, drawn in code
-build.sh                  build / run / stop / app / dmg / install / uninstall / status / icon / clean
+  SocialCard.swift        GitHub's link-preview card, drawn in code from the two docs/ pictures
+build.sh                  build / run / stop / app / dmg / install / uninstall / status / icon /
+                          social / clean
 docs/icon.png             re-rendered by `build.sh icon`; screenshot.png is taken by hand (open the
                           menu, ⇧⌘4, space, click it), then cropped to the menu and the other
-                          menu bar icons painted over with the bar's clean background strip
+                          menu bar icons painted over with the bar's clean background strip;
+                          social-preview.png is `build.sh social` — see the trap below
 dist/                     build products (gitignored)
 ```
 
@@ -237,6 +240,16 @@ update) apply.
 
 ## Traps already found (don't re-learn these)
 
+- **A README hero image is not the link preview.** What chat apps, Slack and Twitter show for
+  a GitHub URL is `og:image`, and that is either a picture uploaded under the repo's
+  Settings › General › Social preview or, failing that, a grey card of the repo name and the
+  contributor count. GitHub never reads the README for it. **There is no API for the upload** —
+  not REST, not GraphQL, not `gh` — so `./build.sh social` only draws the file; putting it on
+  the repo is a manual drag onto that settings page, once per repo, and again whenever the
+  icon or the screenshot changes. Apple's LinkPresentation sometimes scrapes a README image
+  when the `og:image` fetch fails, which makes a repo *look* like it has a preview it hasn't
+  got — check `curl -sL <repo> | grep og:image` instead: an `opengraph.githubassets.com` URL
+  means the generated card, `repository-images.githubusercontent.com` means a real one.
 - **Keychain prompts come from unstable code signatures.** Keychain item ACLs trust a code
   *designated requirement*; an ad-hoc signature's is a per-build hash, so every rebuild (and
   the bare `.build/debug` binary, signed differently from the bundle) prompted for the login

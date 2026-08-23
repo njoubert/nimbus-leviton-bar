@@ -15,6 +15,9 @@
 #                           and the saved preferences
 #   ./build.sh status       running? installed? login item?
 #   ./build.sh icon         re-render docs/icon.png from Sources/NimbusLevitonBar/AppIcon.swift
+#   ./build.sh social       re-render docs/social-preview.png from Sources/NimbusLevitonBar/SocialCard.swift
+#                           — GitHub's link-preview card. Upload it by hand under the repo's
+#                           Settings › General › Social preview; GitHub has no API for it.
 #   ./build.sh clean        remove build products
 #
 # Signing: release bundles (app / dmg / install) are ad-hoc signed unless a Developer ID is
@@ -397,6 +400,11 @@ case "$cmd" in
   icon)
     swift build >/dev/null
     .build/debug/$NAME --render-icon docs/icon.png --size 512
+    ;;
+
+  social)
+    swift build >/dev/null
+    .build/debug/$NAME --render-social docs/social-preview.png
     ;;
 
   clean)
