@@ -1,7 +1,8 @@
 # Nimbus Leviton Bar — notes for agents
 
 A macOS menu bar controller for Leviton Decora Smart Wi-Fi devices through the My Leviton
-cloud, in Swift. Pure SwiftPM, no dependencies, no Xcode project. A sibling of
+cloud, in Swift. Pure SwiftPM, no Xcode project, and one dependency — `NimbusUpdater`, which
+is ours (`../nimbus-updater`, MIT, its own CLAUDE.md carries the updater's traps). A sibling of
 `../nimbus-net-bar` — same build pipeline, same conventions; its CLAUDE.md covers the shared
 traps (DMG layout, Login Items, notarization) in more depth than this one repeats.
 `README.md` is the user-facing description — read it first and keep it true when behaviour
@@ -20,9 +21,13 @@ already found.
 - **Licence headers.** Every new Swift file starts with
   `// Copyright (C) 2026 Niels Joubert` / `// SPDX-License-Identifier: GPL-3.0-or-later`.
   GPL-3.0-or-later; don't vendor code under an incompatible licence.
-- **It talks to one host.** `my.leviton.com` (REST and websocket). Keep it that way and keep
-  README saying so. Secrets live in the Keychain only (`Keychain.swift`) — never in
-  UserDefaults, never in logs (`LevitonRealtime` redacts the token frame even in `--watch`).
+- **It talks to two services, and one of them is optional.** `my.leviton.com` (REST and
+  websocket) for the lights, and — unless the user turns off *Check for Updates
+  Automatically* — `api.github.com` plus `release-assets.githubusercontent.com` for the
+  auto-updater (`NimbusUpdater`, see below). Nothing else, ever, and README must keep saying
+  exactly this. Secrets live in the Keychain only (`Keychain.swift`) — never in UserDefaults,
+  never in logs (`LevitonRealtime` redacts the token frame even in `--watch`), and never in
+  anything sent to GitHub (the update requests carry a User-Agent and nothing else).
 - **These are the owner's real lights.** A test that flips a device is visible in the house.
   Prefer no-op writes (`--set Desk 100` on a lamp already on at 100 %) or ask first.
 - **Sign-in attempts are rate-limited server-side** (`403 Too many failed attempts` locks the
@@ -32,7 +37,8 @@ already found.
 
 ```
 Sources/NimbusLevitonBar/
-  main.swift              flag parsing, AppDelegate, the hidden Edit menu, Login Item registration
+  main.swift              flag parsing, AppDelegate, the hidden Edit menu, Login Item, the Updater
+  Updates.swift           this app's UpdaterConfig: repo, bundle id, team, names, versions
   CLI.swift               --login / --logout / --print / --set / --room / --watch / --get / --put
   LevitonClient.swift     REST: login, residences, devices, update, logout; error mapping
   LevitonRealtime.swift   the websocket: token → ready → subscribe → notifications; reconnect
@@ -73,6 +79,7 @@ queue, which `DeviceStore` enters with `MainActor.assumeIsolated`. `LevitonClien
 .build/debug/NimbusLevitonBar --get PATH      raw GET, pretty-printed (poking at new endpoints)
 .build/debug/NimbusLevitonBar --put PATH JSON raw PUT (record fields the app never writes)
 .build/debug/NimbusLevitonBar --dump-menu P   the rows with sample data → PNG, light and dark
+.build/debug/NimbusLevitonBar --check-update  the release feed as the updater reads it
 ```
 
 No unit tests; `--print` and `--watch` are the correctness checks. The CLI and the app share
@@ -216,6 +223,27 @@ update) apply.
   bar through accessibility instead.
 - **`getpass` needs a tty**; `script -q /dev/null` did not help — use `MYLEVITON_PASSWORD`
   for non-interactive sign-in.
+
+## Auto-update (NimbusUpdater)
+
+The app checks its own GitHub releases and can replace itself. The mechanism, its trust model
+and its traps are documented in `../nimbus-updater/CLAUDE.md`; what matters *here*:
+
+- `Updates.swift` holds the config; `main.swift` builds the `Updater` (never in `--dump-bar`
+  runs), sets `onWillRelaunch` to `store.stop()`, and hands it to `StatusBarController`, which
+  owns the three menu items and the alert from a manual check.
+- **The updater's state must not restructure an open menu** — the same trap as the device rows.
+  `updaterChanged()` only retitles the version line while the menu is open; new items appear on
+  the next open.
+- **A release is invisible to the updater unless it carries `NimbusLevitonBar-<version>.zip`,**
+  built by `build.sh dmg` from the *stapled* app. `./build.sh release NOTES.md` does the whole
+  dance (tag, build, push, publish both artefacts) and is the way to ship from now on.
+- Testing an update without publishing one: `defaults write com.njoubert.nimbuslevitonbar
+  updateFeedURL file:///tmp/latest.json`, a JSON in the API's shape whose asset URL is a local
+  `file://` zip. `defaults delete` it afterwards. The full manual plan is in
+  `docs/autoupdate-plan.md`, which also records what was built and what is left.
+- The updater only ever installs into `/Applications/Nimbus Leviton Bar.app` and only when
+  the running copy *is* that path, so `./build.sh run` builds can never swap themselves.
 
 ## Release and distribution
 

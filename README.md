@@ -61,7 +61,17 @@ reason shows in the status line. Turning a dimmer on sends no level, so the dimm
 applies (back to its last level, or to its preset — whichever you chose in the My Leviton app).
 
 Below the list: **Refresh**, with when the list was last fetched (or the last error) beside it;
-Launch at Login; a link to the web app; Sign Out.
+Launch at Login; the update items (below); a link to the web app; Sign Out.
+
+**Updates** — the app keeps itself current. Once a day, and when you open the menu if the last
+check is stale, it looks for a newer release; when it finds one it downloads it in the
+background and the menu offers **Install Update 1.2.0 and Relaunch**, which takes a couple of
+seconds and puts the menu bar icon back where it was. A download is installed only if macOS
+confirms it is signed by the same Developer ID as the running copy, so a tampered download is
+refused rather than installed. **Check for Updates…** asks straight away and tells you what it
+found; **Check for Updates Automatically** turns the daily check off. A copy that is not
+installed in `/Applications` — run from the disk image, or a debug build — never replaces
+itself; it offers a link to the release page instead.
 
 **Keeping up to date** — the list is refreshed when the menu opens (if it is more than a few
 seconds old), once a minute in the background so the bar count stays honest, and live over
@@ -74,8 +84,17 @@ Leviton app — and keeps them in your login Keychain, never in a preferences fi
 token My Leviton issues is kept there too, so day to day the password is not sent again; it
 is only replayed when a session expires or is rejected. **Sign Out** in the menu removes both.
 
-It talks to `my.leviton.com` and nothing else. There is no analytics, no update check, no
-other network traffic.
+It talks to `my.leviton.com` for everything about your lights: no analytics, no crash
+reporting, nothing else about your home leaves the machine.
+
+The one other thing it contacts is GitHub, to keep itself up to date. Once a day it asks
+`api.github.com` for this project's newest release; if there is one, it downloads the app from
+`release-assets.githubusercontent.com`, checks that the download is signed with the same
+Developer ID as the copy you are running, and then offers **Install Update … and Relaunch** in
+the menu. Nothing is installed until you click that. Those requests carry no account
+information — only the app's name and version, as the User-Agent. Turn the whole thing off
+with **Check for Updates Automatically** in the menu, and nothing contacts GitHub unless you
+pick **Check for Updates…** yourself.
 
 From the command line the same client is available without the UI (handy for scripts and
 for checking what the account returns):
@@ -86,6 +105,7 @@ for checking what the account returns):
 .build/debug/NimbusLevitonBar --set "Kitchen" 40        # a name or an id; on | off | 0–100
 .build/debug/NimbusLevitonBar --watch                   # print realtime updates as they arrive
 .build/debug/NimbusLevitonBar --get Residences/1/residentialRooms   # any GET, pretty-printed
+.build/debug/NimbusLevitonBar --check-update              # what the updater sees on GitHub
 .build/debug/NimbusLevitonBar --logout
 ```
 
