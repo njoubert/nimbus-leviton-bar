@@ -248,7 +248,9 @@ and its traps are documented in `../nimbus-updater/CLAUDE.md`; what matters *her
 ## Release and distribution
 
 Repo: https://github.com/njoubert/nimbus-leviton-bar — releases carry the notarized DMG
-(1.0.0, 1.1.0 and 1.1.1 shipped 2026-08-21; 1.1.2 on 2026-08-22). Same as net-bar: `VERSION=` in `build.sh`, `CFBundleVersion` = commit count, `./build.sh dmg`,
+(1.0.0, 1.1.0 and 1.1.1 shipped 2026-08-21; 1.1.2 and 1.2.0 on 2026-08-22). From 1.2.0 the
+app updates itself, so **every release must carry both the DMG and the zip** — use
+`./build.sh release NOTES.md`, which does the whole dance and cannot forget the zip. Same as net-bar: `VERSION=` in `build.sh`, `CFBundleVersion` = commit count, `./build.sh dmg`,
 check the mounted image by eye, tag `v<VERSION>`, `gh release create`. Signing/notarization
 read `SIGN_IDENTITY` / `NOTARY_PROFILE` from a git-ignored `.signing` (the notary profile is
 per Apple ID, shared across projects). Unsigned builds need "Open Anyway" when quarantined. The release binary is arm64 only (plain
