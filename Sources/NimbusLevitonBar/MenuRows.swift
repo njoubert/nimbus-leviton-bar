@@ -115,6 +115,31 @@ class MenuRow: NSView {
     }
 }
 
+/// The track with a second, lighter fill on it. A room's knob sits at the *lowest* level in
+/// the room (see `RoomRow.set`); the band carries on to the highest, so a room of dim lights
+/// with one bright one in it still shows how far up the rest of it goes. Indicative only —
+/// it is drawn inside the bar, under the knob, so nothing about it invites a drag.
+final class RangeSliderCell: NSSliderCell {
+    /// Top of the band in slider units. nil, or at/below the knob, draws nothing.
+    var rangeTop: Double?
+
+    override func drawBar(inside rect: NSRect, flipped: Bool) {
+        super.drawBar(inside: rect, flipped: flipped)
+        guard let top = rangeTop, top > doubleValue else { return }
+        // The knob's travel is a knob-width shorter than the bar, and its *centre* is what a
+        // value maps to — interpolating straight across `rect` drifts from the knob at both ends.
+        let span = maxValue - minValue
+        guard span > 0 else { return }
+        let knob = knobRect(flipped: flipped).width
+        func x(_ v: Double) -> CGFloat { rect.minX + knob / 2 + CGFloat((v - minValue) / span) * (rect.width - knob) }
+        let from = x(doubleValue), to = x(top)
+        guard to > from else { return }
+        let band = NSRect(x: from, y: rect.minY, width: to - from, height: rect.height).intersection(rect)
+        (isEnabled ? NSColor.controlAccentColor.withAlphaComponent(0.4) : NSColor.tertiaryLabelColor).setFill()
+        NSBezierPath(roundedRect: band, xRadius: rect.height / 2, yRadius: rect.height / 2).fill()
+    }
+}
+
 /// A slider with its percent label. `level` 0 means off; anything above is floored at
 /// `minLevel`. Dragging updates the label live; `onCommit` fires once, on release (the cloud
 /// round-trip is slow and there is no point sending thirty intermediate levels).
@@ -141,10 +166,19 @@ final class LevelControl: NSView {
         get { percent.textColor ?? .secondaryLabelColor }
         set { percent.textColor = newValue }
     }
+    /// Display only: the top of the indicator band (see `RangeSliderCell`). nil hides it.
+    var rangeTop: Int? {
+        didSet {
+            guard rangeTop != oldValue else { return }
+            (slider.cell as? RangeSliderCell)?.rangeTop = rangeTop.map(Double.init)
+            slider.needsDisplay = true
+        }
+    }
 
     init(maxLevel: Int) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
+        slider.cell = RangeSliderCell()   // before the settings below: they forward to the cell
         slider.minValue = 0
         slider.maxValue = Double(maxLevel)
         slider.isContinuous = true
@@ -256,6 +290,8 @@ final class RoomRow: MenuRow {
     private let name = MenuRow.label(weight: .semibold)
     private let count = MenuRow.label(NSFont.smallSystemFontSize, mono: true)
     private var level: LevelControl?
+    /// What the slider's band is showing, for the tooltip; nil when every lit dimmer matches.
+    private(set) var spread: String?
 
     /// `dimmers`: true adds the slider (it cannot be added later; the row is rebuilt on open).
     init(dimmers: Bool, toggle: @escaping () -> Void, setLevel: ((Int) -> Void)? = nil) {
@@ -298,19 +334,32 @@ final class RoomRow: MenuRow {
             detail: reachable.isEmpty ? "offline" : "\(on) of \(reachable.count) on", enabled: !reachable.isEmpty, devices: devices)
         toolTip = "Click to turn the whole room \(room.power ? "off" : "on")"
             + (level != nil ? "\nThe slider sets every dimmer in it" : "")
+            + (spread.map { "\n\($0)" } ?? "")
     }
 
-    /// The same row for something that is not a room (All Devices). The slider, if any,
-    /// shows the average level of the dimmers that are on.
+    /// The same row for something that is not a room (All Devices). The slider, if any, sits at
+    /// the *lowest* level among every dimmer it would move — an off one counting as 0, so a room
+    /// with one dimmer off reads 0 — and its band runs on to the highest. Not the average: the
+    /// knob is the level the whole room is at least at, so a nudge up from it can only ever be
+    /// a small change, whereas an average lets one bright light drag the dim ones up with it.
     func set(dot d: MenuRow.Dot, name n: String, detail: String, enabled: Bool, devices: [Device]) {
         dot.image = MenuRow.dotImage(d)
         name.stringValue = n
         count.stringValue = detail
         isEnabled = enabled
         if let l = level, !l.dragging {
-            let lit = devices.filter { $0.canSetLevel && $0.isOn }
-            l.level = lit.isEmpty ? 0 : lit.map(\.levelClamped).reduce(0, +) / lit.count
-            l.isEnabled = devices.contains { $0.canSetLevel && $0.connected }
+            // Exactly the devices `setBrightness(ofAll:)` moves, so the knob is the floor of
+            // what the slider controls. Off is 0: it is a dimmer sitting at the bottom, not an
+            // absence — leaving it out would show a floor the room has not actually reached.
+            let levels = devices.filter { $0.canSetLevel && $0.connected }
+                .map { $0.power ? $0.levelClamped : 0 }.sorted()
+            l.level = levels.first ?? 0
+            l.rangeTop = (levels.last ?? 0) > (levels.first ?? 0) ? levels.last : nil
+            l.isEnabled = !levels.isEmpty
+            spread = l.rangeTop.map { top in
+                levels.first == 0 ? "Its dimmers run from off up to \(top)%"
+                                  : "Its dimmers are \(levels.first ?? 0)–\(top)% right now"
+            }
         }
         refreshAppearance()
     }

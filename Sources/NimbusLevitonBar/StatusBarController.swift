@@ -230,6 +230,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         row.toolTip = store.summary + "\n"
             + (store.devicesReachable == 0 ? "Nothing is reachable right now"
                : "Click to turn everything \(store.devicesOn > 0 ? "off" : "on")\nThe slider sets every dimmer in the home")
+            + (row.spread.map { "\n\($0)" } ?? "")
             + (store.lastError.map { "\n⚠︎ \($0)" } ?? "")
     }
 
