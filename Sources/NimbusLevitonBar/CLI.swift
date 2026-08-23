@@ -16,6 +16,7 @@ enum CLI {
         case get(path: String)
         case put(path: String, json: String)
         case checkUpdate
+        case preflight(app: String)
     }
 
     static func run(_ cmd: Command) -> Int32 {
@@ -152,6 +153,33 @@ enum CLI {
                 Swift.print(release.version > current
                     ? (release.asset != nil ? "→ an update is available" : "→ newer, but nothing installable is published")
                     : "→ up to date")
+
+            case .preflight(let path):
+                // What must stay true for auto-update to keep working, checked against a built
+                // bundle. `build.sh release` runs this before it pushes anything.
+                // The version comes from the bundle being checked — this is about *that* build,
+                // not whatever happens to be installed or running.
+                let plist = URL(fileURLWithPath: path).appendingPathComponent("Contents/Info.plist")
+                let info = (try? Data(contentsOf: plist)).flatMap {
+                    try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any]
+                } ?? nil
+                guard let short = info?["CFBundleShortVersionString"] as? String,
+                      let version = SemanticVersion(short) else {
+                    fputs("\(path) has no readable CFBundleShortVersionString\n", stderr); return 1
+                }
+                let report = try block {
+                    await Preflight.run(app: URL(fileURLWithPath: path),
+                                        config: Updates.config(currentVersion: version),
+                                        releaseVersion: version)
+                }
+                for check in report.checks {
+                    Swift.print("\(check.ok ? "ok  " : "FAIL") \(check.name): \(check.detail)")
+                }
+                guard report.passed else {
+                    fputs("\nthis build would break auto-update for people who already have the app\n", stderr)
+                    return 1
+                }
+                Swift.print("\npreflight passed")
 
             case .watch:
                 let s = try session(client)

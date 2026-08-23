@@ -30,7 +30,7 @@ func usage() -> Never {
                             [--render-icon PATH [--size PX]] [--render-iconset DIR]
                             [--login EMAIL | --logout | --print | --set DEVICE on|off|N | --watch]
                             [--room ROOM on|off | --get PATH | --put PATH JSON | --dump-menu PATH]
-                            [--check-update]
+                            [--check-update | --preflight APP.app]
     """)
     exit(2)
 }
@@ -79,6 +79,7 @@ while !args.isEmpty {
     case "--watch": cli = .watch
     case "--get": cli = .get(path: takeValue(a))
     case "--check-update": cli = .checkUpdate
+    case "--preflight": cli = .preflight(app: takeValue(a))
     case "--put":
         let path = takeValue(a), json = takeValue(a)
         cli = .put(path: path, json: json)
