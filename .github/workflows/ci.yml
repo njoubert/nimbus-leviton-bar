@@ -46,11 +46,17 @@ jobs:
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "prefix=$prefix-" >> "$GITHUB_OUTPUT"
           echo "declared: $bundle_id / $team / $name / $prefix-"
+      # Authenticated so four repos checking at once do not exhaust GitHub's 60/hour
+      # unauthenticated limit from the shared runner addresses. The app itself never sends this.
       - name: The published release must still carry an installable zip
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           swift run --package-path .updater updaterctl check \
             --repo "$GITHUB_REPOSITORY" --prefix "${{ steps.declared.outputs.prefix }}" --require-asset
       - name: The published release must match the identity this source declares
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           swift run --package-path .updater updaterctl released-identity \
             --repo "$GITHUB_REPOSITORY" --app-name "${{ steps.declared.outputs.name }}" \
