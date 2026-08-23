@@ -10,7 +10,7 @@ build on each other and the test plan at the end is the definition of done.
 | Question | Decision |
 |---|---|
 | Mechanism | Hand-rolled, no Sparkle, no Homebrew. Trust anchor is the apps' existing Developer ID signature, verified with the Security framework against an explicit requirement. |
-| Where the code lives | A new repo `njoubert/nimbus-updater`, a SwiftPM library package (`NimbusUpdater`), GPL-3.0-or-later, depended on by both apps via `Package.swift`. Not a submodule, not a copied file. |
+| Where the code lives | The repo `njoubert/nimbus-updater`, a SwiftPM library package (`NimbusUpdater`), **MIT** (permissive so both GPL apps can depend on it), pulled in via `Package.swift`. Not a submodule, not a copied file. **Built and tagged `v1.0.0` on 2026-08-22 — Part A below is done; start at Part B.** |
 | Network policy | Automatic checks **on by default**, with a "Check for Updates Automatically" toggle in the menu. README and CLAUDE.md stop saying "one host" and name the two GitHub hosts. |
 | Download policy | Download and verify **before** asking. The menu then offers a one-click "Install Update and Relaunch". |
 | Scope | Both apps. The package is app-agnostic; each app contributes ~60 lines of menu glue. |
@@ -53,7 +53,25 @@ build on each other and the test plan at the end is the definition of done.
   `build.sh` is within ~40 diff lines of net-bar's after name substitution; its changes are
   mirrored by hand, as today.
 
-## Part A — the package: `njoubert/nimbus-updater`
+## Part A — the package: `njoubert/nimbus-updater` — **DONE (v1.0.0)**
+
+Built on 2026-08-22 and tagged. What shipped differs from the sketch below in four ways, all
+deliberate:
+
+- **`State.available(Release)`** was added: a newer release that cannot be staged from here —
+  no zip asset, or this copy is not the one in `/Applications`. The sketch folded that into
+  `.upToDate`, which would have lied to the user.
+- **`UpdaterConfig.currentVersion`** is explicit rather than read from `Bundle.main`, so the
+  CLI (which has no Info.plist) can use the same code. `SemanticVersion.ofBundle()` is the
+  helper the app passes.
+- **Licence headers are MIT**, not GPL-3.0-or-later — this repo is the permissive one.
+- **`updaterctl`** was added: a probe with `check` (a feed) and `verify` (a real bundle), which
+  is what the Part D tests drive. `./build.sh check leviton|net` wires it to the two apps.
+
+Its own CLAUDE.md carries the traps. The rest of this section is kept as the record of what was
+asked for.
+
+### As specified
 
 ### Layout
 
@@ -225,7 +243,10 @@ instance may still be exiting; give up quietly and try next launch), delete
 
 ## Part B — integrating into nimbus-leviton-bar
 
-**B0. Publish the first zip asset** so there's something real to test against:
+**B0. Publish the first zip asset** so there's something real to test against. The zip/verify
+round trip was checked on 2026-08-22 (a `ditto -c -k --keepParent` of the stapled 1.1.2 app,
+unpacked with `ditto -x -k`, still passes `updaterctl verify` and `stapler validate`); only the
+upload is left:
 ```
 ditto -c -k --keepParent "dist/Nimbus Leviton Bar.app" dist/NimbusLevitonBar-1.1.2.zip
 gh release upload v1.1.2 dist/NimbusLevitonBar-1.1.2.zip

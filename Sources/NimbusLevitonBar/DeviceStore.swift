@@ -214,6 +214,10 @@ final class DeviceStore {
         refresh()
     }
 
+    /// Put the store to sleep: no poll, no socket. Called before an update swaps the app out
+    /// from under us, so the outgoing copy is not still talking while the new one starts.
+    func stop() { stopPolling() }
+
     private func startPolling() {
         stopPolling()
         let t = Timer(timeInterval: Self.pollInterval, repeats: true) { [weak self] _ in

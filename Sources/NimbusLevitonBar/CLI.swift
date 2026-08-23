@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Niels Joubert
 // SPDX-License-Identifier: GPL-3.0-or-later
 import Foundation
+import NimbusUpdater
 
 /// The command-line face of the client: the same Keychain login and the same requests as the
 /// menu, minus the UI. The quickest way to check the data path against the real account.
@@ -14,6 +15,7 @@ enum CLI {
         case watch
         case get(path: String)
         case put(path: String, json: String)
+        case checkUpdate
     }
 
     static func run(_ cmd: Command) -> Int32 {
@@ -126,6 +128,30 @@ enum CLI {
                 let reply = try block { try await client.rawPut(s, path, body: body) }
                 let out = try JSONSerialization.data(withJSONObject: reply, options: [.prettyPrinted, .sortedKeys])
                 Swift.print(String(decoding: out, as: UTF8.self))
+
+            case .checkUpdate:
+                // The updater's data path, without the app around it: the feed, the parse and
+                // the comparison. Installing needs the real bundle, so that is not offered here.
+                let current = Updates.runningVersion ?? Updates.installedVersion
+                guard let current else {
+                    fputs("no version to compare against: \(Updates.appName) is not installed\n", stderr); return 1
+                }
+                let config = Updates.config(currentVersion: current)
+                let where_ = Updates.runningVersion != nil ? "this bundle" : "the installed copy"
+                Swift.print("current: \(current)  (\(where_))")
+                let found = try block { try await Release.fetchLatest(config) }
+                guard let release = found else {
+                    Swift.print("latest:  none the updater can read"); return 0
+                }
+                Swift.print("latest:  \(release.version)  [\(release.tag)]")
+                if let asset = release.asset {
+                    Swift.print("asset:   \(asset.name)  (\(asset.size) bytes)")
+                } else {
+                    Swift.print("asset:   none named \(config.assetPrefix)\(release.version.text).zip — invisible to the updater")
+                }
+                Swift.print(release.version > current
+                    ? (release.asset != nil ? "→ an update is available" : "→ newer, but nothing installable is published")
+                    : "→ up to date")
 
             case .watch:
                 let s = try session(client)

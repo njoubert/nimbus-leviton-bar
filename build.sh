@@ -36,6 +36,7 @@ INSTALLED="$INSTALL_DIR/$APP_NAME.app"
 DEV_APP="dist/debug/$APP_NAME.app"
 REL_APP="dist/$APP_NAME.app"
 DMG="dist/$NAME-$VERSION.dmg"
+ZIP="dist/$NAME-$VERSION.zip"     # what the auto-updater downloads; see docs/autoupdate-plan.md
 
 # Developer ID signing / notarization, off unless configured (see the header).
 SIGN_IDENTITY="${SIGN_IDENTITY:-}"
@@ -128,6 +129,17 @@ notarize_app() {
   ditto -c -k --keepParent "$app" "$zip"
   notarize "$zip" "$app"
   rm -f "$zip"
+}
+
+# The auto-updater's asset: the stapled app, zipped with ditto (which keeps symlinks and
+# extended attributes, so the signature and the notarization ticket survive). Must run after
+# notarize_app, or the download is the pre-staple copy.
+#   make_zip <app> <out.zip>
+make_zip() {
+  local app=$1 out=$2
+  rm -f "$out"
+  ditto -c -k --keepParent "$app" "$out"
+  note "packed $out ($(du -h "$out" | cut -f1))"
 }
 
 # Wrap dist/NimbusLevitonBar.app in the usual drag-to-Applications disk image: the app, an
@@ -275,9 +287,45 @@ case "$cmd" in
     swift build -c release
     make_bundle release "$REL_APP"
     [ -n "$SIGN_IDENTITY" ] && notarize_app "$REL_APP"
+    make_zip "$REL_APP" "$ZIP"
     make_dmg "$REL_APP" "$DMG"
     say "built $DMG"
     note "Test it: open $DMG"
+    ;;
+
+  # Everything a release needs, in the order the notes say: build both artefacts, tag, publish.
+  # Refuses to publish from a dirty tree or a commit that is not the version's tag.
+  release)
+    notes=${1:-}
+    if [ -z "$notes" ] || [ ! -f "$notes" ]; then
+      warn "usage: ./build.sh release NOTES.md   (the GitHub release body)"
+      exit 2
+    fi
+    if [ -n "$(git status --porcelain)" ]; then
+      warn "working tree is dirty; commit first"
+      exit 1
+    fi
+    tag="v$VERSION"
+    if git rev-parse "$tag" >/dev/null 2>&1; then
+      if [ "$(git rev-parse "$tag^{commit}")" != "$(git rev-parse HEAD)" ]; then
+        warn "$tag exists but is not HEAD"
+        exit 1
+      fi
+    else
+      git tag -a "$tag" -m "$APP_NAME $VERSION"
+      note "tagged $tag"
+    fi
+    "$0" dmg
+    git push origin main
+    git push origin "$tag"
+    if command -v gh >/dev/null 2>&1; then
+      gh release create "$tag" "$DMG" "$ZIP" --title "$VERSION" --notes-file "$notes"
+      say "published $tag"
+    else
+      warn "gh is not installed; publish by hand:"
+      note "gh release create $tag $DMG $ZIP --title $VERSION --notes-file $notes"
+    fi
+    note "the updater needs $(basename "$ZIP") on the release — a DMG-only release is invisible to it"
     ;;
 
   install)
@@ -300,6 +348,8 @@ case "$cmd" in
     ;;
 
   uninstall)
+    rm -rf "$HOME/Library/Caches/$BUNDLE_ID"
+    rm -rf "$INSTALL_DIR/.$NAME-old.app" "$INSTALL_DIR/.$NAME-update.app"
     if [ -e "$INSTALLED" ]; then
       stop_all
       # Unregister from the installed bundle before it disappears, or Login Items keeps a ghost.
@@ -326,6 +376,14 @@ case "$cmd" in
       gate=$(spctl -a -t exec -v "$INSTALLED" 2>&1 || true)   # "source=Notarized Developer ID" when stapled/notarized
       note "signed by: ${auth:-ad-hoc (no identity)}  ·  Gatekeeper: ${gate#*: }"
       note "login item: $("$INSTALLED/Contents/MacOS/$NAME" --login-item-status)"
+      if [ -w "$INSTALL_DIR" ]; then
+        note "updates: $INSTALL_DIR is writable, so the app can replace itself"
+      else
+        warn "updates: $INSTALL_DIR is not writable by you — the app will only link to the release page"
+      fi
+      for stray in "$INSTALL_DIR/.$NAME-old.app" "$INSTALL_DIR/.$NAME-update.app"; do
+        [ -e "$stray" ] && warn "left over from an update: $stray"
+      done
     else
       note "not installed in $INSTALL_DIR"
     fi

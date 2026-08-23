@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Niels Joubert
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
+import NimbusUpdater
 
 // Nimbus Leviton Bar — a menu bar controller for Leviton Decora Smart Wi-Fi devices via the
 // My Leviton cloud. See README.md.
@@ -29,6 +30,7 @@ func usage() -> Never {
                             [--render-icon PATH [--size PX]] [--render-iconset DIR]
                             [--login EMAIL | --logout | --print | --set DEVICE on|off|N | --watch]
                             [--room ROOM on|off | --get PATH | --put PATH JSON | --dump-menu PATH]
+                            [--check-update]
     """)
     exit(2)
 }
@@ -76,6 +78,7 @@ while !args.isEmpty {
     case "--print": cli = .print
     case "--watch": cli = .watch
     case "--get": cli = .get(path: takeValue(a))
+    case "--check-update": cli = .checkUpdate
     case "--put":
         let path = takeValue(a), json = takeValue(a)
         cli = .put(path: path, json: json)
@@ -139,7 +142,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installEditMenu()
 
         store = DeviceStore()
-        statusBar = StatusBarController(store: store)
+
+        // The updater, unless this launch is a screenshot run. It checks GitHub for a newer
+        // release (daily, and when the menu opens if the last check is stale), stages one that
+        // is signed by the same Developer ID as this copy, and waits for a click.
+        var updater: Updater?
+        if dumpBarPath == nil, let version = Updates.runningVersion {
+            let u = Updater(config: Updates.config(currentVersion: version))
+            u.onWillRelaunch = { [weak store] in store?.stop() }
+            updater = u
+        }
+        statusBar = StatusBarController(store: store, updater: updater)
+        updater?.onChange = { [weak self] in self?.statusBar.updaterChanged() }
+        updater?.start()
 
         // Login Item. `build.sh install` passes --enable-login-item; a drag-install from the
         // disk image has nobody to pass it, so the first launch from /Applications registers

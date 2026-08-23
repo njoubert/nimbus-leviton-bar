@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Niels Joubert
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
+import NimbusUpdater
 
 /// The status item (a lightbulb, filled when any light is on, with the count) and its
 /// dropdown: rooms in My Leviton's order, one row per device under each — click to toggle,
@@ -15,6 +16,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let item: NSStatusItem
     private let menu = NSMenu()
     private let store: DeviceStore
+    /// nil when this launch has no business updating anything (the `--dump-bar` screenshot run).
+    private let updater: Updater?
     private var menuOpen = false
 
     private var deviceRows: [String: DeviceRow] = [:]
@@ -23,9 +26,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var statusRow: TextRow?
     private var lastBar: (on: Int, summary: String, signedIn: Bool)?
     private var askingForCode = false
+    private var versionItem: NSMenuItem?
 
-    init(store: DeviceStore) {
+    init(store: DeviceStore, updater: Updater? = nil) {
         self.store = store
+        self.updater = updater
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         menu.delegate = self
@@ -82,7 +87,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     // MARK: Menu lifecycle
 
     func menuNeedsUpdate(_ menu: NSMenu) { rebuild() }
-    func menuWillOpen(_ menu: NSMenu) { menuOpen = true; store.refreshIfStale() }
+    func menuWillOpen(_ menu: NSMenu) {
+        menuOpen = true
+        store.refreshIfStale()
+        updater?.checkIfStale()
+    }
     func menuDidClose(_ menu: NSMenu) {
         menuOpen = false
         for v in menu.items.compactMap({ $0.view as? MenuRow }) { v.clearHover() }
@@ -129,6 +138,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             login.toolTip = "This copy runs from \(Bundle.main.bundlePath). Registering it points the Login Item at this path — use ./build.sh install for the real thing."
         }
         menu.addItem(login)
+        addUpdateItems()
         menu.addItem(action("Open My Leviton on the Web", #selector(openWeb)))
         if store.isSignedIn || store.email != nil {
             menu.addItem(action("Sign Out\(store.email.map { " (\($0))" } ?? "")", #selector(signOut)))
@@ -138,12 +148,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let versionText = Self.versionString()
         let version = NSMenuItem(title: versionText, action: #selector(copyValue(_:)), keyEquivalent: "")
         version.target = self
-        version.representedObject = versionText
+        version.representedObject = versionText   // copy the version, not the update note
         version.toolTip = "Click to copy"
-        version.attributedTitle = NSAttributedString(string: versionText, attributes: [
-            .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
-            .foregroundColor: NSColor.secondaryLabelColor])
         menu.addItem(version)
+        versionItem = version
+        updateVersionRow()
         menu.addItem(NSMenuItem(title: "Quit Nimbus Leviton Bar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
@@ -265,6 +274,113 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         guard let s = sender.representedObject as? String else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(s, forType: .string)
+    }
+
+    // MARK: Updates
+
+    /// Above "Open My Leviton on the Web": what the updater has, if anything, and the two
+    /// controls. Nothing here appears when the app runs from anywhere but /Applications
+    /// except the manual check, which then just opens the release page.
+    private func addUpdateItems() {
+        guard let updater else { return }
+        switch updater.state {
+        case .ready(let release) where updater.canInstall:
+            let install = action("Install Update \(release.version) and Relaunch", #selector(installUpdate))
+            let firstLines = release.notes.split(separator: "\n").prefix(3).joined(separator: "\n")
+            install.toolTip = firstLines.isEmpty
+                ? "Downloaded and checked against this app's Developer ID. Installs in a few seconds."
+                : firstLines
+            menu.addItem(install)
+        case .available(let release):
+            let item = action("Update \(release.version) Available…", #selector(openUpdatePage))
+            item.toolTip = updater.canInstall
+                ? "That release has no installable download; this opens its page."
+                : "Updates install only into /Applications, and this copy runs from \(Bundle.main.bundlePath). Opens the release page."
+            menu.addItem(item)
+        case .downloading(let release):
+            menu.addItem(disabled("Downloading \(release.version)…"))
+        case .installing:
+            menu.addItem(disabled("Installing…"))
+        default:
+            break
+        }
+
+        let check = action("Check for Updates…", #selector(checkForUpdates))
+        switch updater.state {
+        case .checking, .downloading, .installing: check.isEnabled = false
+        default: break
+        }
+        menu.addItem(check)
+
+        if updater.canInstall {
+            let auto = NSMenuItem(title: "Check for Updates Automatically",
+                                  action: #selector(toggleAutomaticUpdates(_:)), keyEquivalent: "")
+            auto.target = self
+            auto.state = updater.automaticChecks ? .on : .off
+            auto.toolTip = "Once a day, asks github.com for the newest release and downloads it."
+            menu.addItem(auto)
+        }
+    }
+
+    /// The updater moved. Structural changes wait for the next open (the menu must not be
+    /// rebuilt under the cursor), but the version line can say so straight away.
+    func updaterChanged() {
+        guard menuOpen else { return }
+        updateVersionRow()
+    }
+
+    private func updateVersionRow() {
+        guard let item = versionItem else { return }
+        var text = Self.versionString()
+        if let updater, case .ready(let release) = updater.state { text += "  ·  \(release.version) ready" }
+        item.attributedTitle = NSAttributedString(string: text, attributes: [
+            .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
+            .foregroundColor: NSColor.secondaryLabelColor])
+    }
+
+    @objc private func installUpdate() { updater?.installAndRelaunch() }
+
+    @objc private func openUpdatePage() { updater?.openReleasePage() }
+
+    @objc private func toggleAutomaticUpdates(_ sender: NSMenuItem) {
+        guard let updater else { return }
+        updater.automaticChecks.toggle()
+        sender.state = updater.automaticChecks ? .on : .off
+    }
+
+    /// The manual check always goes to the network and always says what happened — the one
+    /// place the updater is allowed to put something on screen.
+    @objc private func checkForUpdates() {
+        guard let updater else { return }
+        Task { @MainActor in
+            let state = await updater.checkNow()
+            let alert = NSAlert()
+            switch state {
+            case .ready(let release):
+                alert.messageText = "Update \(release.version) is ready"
+                alert.informativeText = "Choose \u{201C}Install Update \(release.version) and Relaunch\u{201D} in the menu."
+            case .available(let release):
+                alert.messageText = "Version \(release.version) is available"
+                alert.informativeText = updater.canInstall
+                    ? "That release has no installable download — open its page to get it."
+                    : "Updates install only into /Applications, and this copy runs from \(Bundle.main.bundlePath)."
+                alert.addButton(withTitle: "OK")
+                alert.addButton(withTitle: "Open Release Page")
+                NSApp.activate(ignoringOtherApps: true)
+                if alert.runModal() == .alertSecondButtonReturn { updater.openReleasePage() }
+                return
+            case .failed(let message, _):
+                alert.messageText = "Could not check for updates"
+                alert.informativeText = message
+                alert.alertStyle = .warning
+            default:
+                alert.messageText = "You\u{2019}re up to date"
+                alert.informativeText = "\(Self.versionString()) is the newest release."
+            }
+            alert.addButton(withTitle: "OK")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
     }
 
     // MARK: Helpers
