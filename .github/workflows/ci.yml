@@ -20,8 +20,6 @@ jobs:
         run: swift build
       - name: Build release
         run: swift build -c release
-      - name: Shellcheck
-        run: shellcheck build.sh
 
   # Signing lives on the owner's machine, so CI cannot run the full preflight (it needs a
   # Developer ID build). It can ask the other half: does what this source declares still match
@@ -59,3 +57,12 @@ jobs:
             --prefix "${{ steps.declared.outputs.prefix }}" \
             --expect-bundle-id "${{ steps.declared.outputs.bundle_id }}" \
             --expect-team "${{ steps.declared.outputs.team }}"
+
+  # shellcheck ships on the Ubuntu runners and not on the macOS ones, and linting a shell
+  # script needs no Mac.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shellcheck
+        run: shellcheck build.sh
