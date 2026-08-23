@@ -139,7 +139,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
         menu.addItem(login)
         addUpdateItems()
-        menu.addItem(action("Open My Leviton on the Web", #selector(openWeb)))
         if store.isSignedIn || store.email != nil {
             menu.addItem(action("Sign Out\(store.email.map { " (\($0))" } ?? "")", #selector(signOut)))
         }
@@ -255,7 +254,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     // MARK: Actions
 
     @objc private func retry() { store.retry() }
-    @objc private func openWeb() { NSWorkspace.shared.open(URL(string: "https://my.leviton.com")!) }
 
     @objc private func signIn() {
         guard let login = SignInDialog.run(email: store.email) else { return }
@@ -279,7 +277,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     // MARK: Updates
 
-    /// Above "Open My Leviton on the Web": what the updater has, if anything, and the two
+    /// Under "Launch at Login": what the updater has, if anything, and the two
     /// controls. Nothing here appears when the app runs from anywhere but /Applications
     /// except the manual check, which then just opens the release page.
     private func addUpdateItems() {

@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" alt="Nimbus Leviton Bar: the lightbulb with the count of devices on in the menu bar, and the dropdown — All Devices with its tally and slider, then each room with its dot, tally and slider, and each device under its room with a slider for dimmers; offline devices marked in red; Refresh, Launch at Login, Open My Leviton on the Web, Sign Out, version, Quit" width="358">
+  <img src="docs/screenshot.png" alt="Nimbus Leviton Bar: the lightbulb with the count of devices on in the menu bar, and the dropdown — All Devices with its tally and slider, then each room with its dot, tally and slider, and each device under its room with a slider for dimmers; offline devices marked in red; Refresh, Launch at Login, Sign Out, version, Quit" width="358">
 </p>
 
 ```
