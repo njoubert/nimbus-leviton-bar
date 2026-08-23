@@ -53,13 +53,16 @@ My Leviton app, and dragging a slider to 0 turns the light off. Click a **room**
 the way the My Leviton app does — through My Leviton's own room switch, which moves every
 device in the room; the room row shows `2 of 3 on`. A room with a dimmer in it gets a slider
 of its own — as does All Devices — which sets every reachable dimmer in that room (or the
-whole home) to one level; it shows the average level of the ones that are on, and 0 switches
-them all off.
+whole home) to one level. Its knob sits at the *lowest* of them, counting an off dimmer as 0 —
+so a room of dim lights with one bright one in it doesn't read as bright, and a small nudge
+can't blast the room — and a lighter band carries on from the knob to the highest, so you can
+still see how far up the rest of the room goes. 0 switches them all off.
 
 None of these clicks close the menu, so you can set up a room in one visit. A row flips the
 moment you click it and the request follows; if My Leviton says no, the row snaps back and the
 reason shows in the status line. Turning a dimmer on sends no level, so the dimmer's own rule
-applies (back to its last level, or to its preset — whichever you chose in the My Leviton app).
+applies (back to its last level, or to its preset — whichever you chose in the My Leviton app;
+[Setting up](#setting-up) suggests which, and why).
 
 Below the list: **Refresh**, with when the list was last fetched (or the last error) beside it;
 Launch at Login; the update items (below); a link to the web app; Sign Out.
@@ -80,6 +83,31 @@ itself; it offers a link to the release page instead.
 **Keeping up to date** — the list is refreshed when the menu opens (if it is more than a few
 seconds old), once a minute in the background so the bar count stays honest, and live over
 My Leviton's realtime feed when a switch is changed from the wall, the app, or a schedule.
+
+## Setting up
+
+1. **Install it** — `./build.sh install` builds a release copy into `/Applications`, launches
+   it and adds it to your Login Items. From a disk image, drag it across and open it once from
+   `/Applications`; see [Distribution](#distribution) for what macOS will say about an
+   unsigned copy.
+2. **Sign in** — it asks for your My Leviton email and password on first launch (and for the
+   emailed code, if your account uses two-factor). They go in your login Keychain; see
+   [Account and privacy](#account-and-privacy).
+3. **Check Launch at Login** — the first launch from `/Applications` sets it for you; the menu
+   item turns it off again and that sticks.
+4. **Set your dimmers to "last level"** — in the My Leviton app, a dimmer's settings let it
+   either come back on at the level it was last at or come on at a fixed preset level you pick.
+   Turn the preset off, so it returns to the last level. Both work here, but the sliders are
+   nicer that way.
+
+**Why that last one matters.** The reason is in the hardware: a dimmer with a fixed preset
+comes on at that preset no matter what the cloud is told in the same breath. Setting one from
+off to 40 % therefore takes two requests two seconds apart — switch it on, wait for it to
+report where it landed, then dim it — and you watch the light sit at its preset (100 %, say)
+before it drops to the 40 % you asked for. A "last level" dimmer takes both in one request and
+arrives at 40 % directly, with no detour. Nothing misbehaves if you keep your presets; those
+dimmers are just slower to set, and they flash on the way. `--print` marks the ones that have a
+preset, so you can see at a glance which is which.
 
 ## Account and privacy
 

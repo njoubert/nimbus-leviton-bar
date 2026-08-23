@@ -125,12 +125,33 @@ update) apply.
   `name`, `power` ("ON"/"OFF"), `brightness` (0–100), `canSetLevel`, `minLevel`/`maxLevel`,
   `model`, `serial`, `connected`, `residenceId`, `deleted`. `canSetLevel`, not the model,
   decides whether a slider is shown. Ids are JSON integers; the code carries them as strings.
-- **Writes:** `PUT /api/IotSwitches/{id}` with `{"power":"ON","brightness":n}`; the reply is
-  the whole record. A toggle sends `power` *only*, so the dimmer's own on-behaviour applies
-  (`presetLevel` 0 = last level, else that preset — set in the My Leviton app); the slider
-  sends brightness together with `power: ON`, because a level change on an off dimmer is
-  invisible and clients disagree on what the server does with it. Fans (`*SF`) take
-  brightness in steps of 25.
+- **Writes:** `PUT /api/IotSwitches/{id}` with `{"power":…}` and/or `{"brightness":n}`; the
+  reply is the whole record. A toggle sends `power` *only*, so the dimmer's own on-behaviour
+  applies (`presetLevel` 0 = last level, else that preset — set in the My Leviton app). Fans
+  (`*SF`) take brightness in steps of 25.
+- **`presetLevel` decides how a level write has to be sent, and it is per device.** It is the
+  level a dimmer comes up at, set in the My Leviton app; **0 means "last level"**. It rides
+  along on `Residences/{id}/iotSwitches`, so `Device.presetLevel` is always populated;
+  `comesOnAtPreset` is the thing to branch on, and an *unknown* preset counts as having one
+  (guessing wrong that way costs a slow write, the other way costs a wrong level).
+  `--print` shows `preset=N` for the devices that have one.
+  - **Off with a preset → two writes, On first, `onSettle` (2 s) apart.** `{"power":"ON",
+    "brightness":n}` in one PUT does not work for these, and neither does brightness-then-On:
+    the cloud accepts n and echoes it back, but the **device** comes up at its `presetLevel`
+    and reports that ~1–1.5 s later, overwriting n. The level therefore has to be written after
+    that report. The light is visibly at its preset for that moment; only rewriting the user's
+    `presetLevel` would avoid it, and that is their setting, so we don't.
+  - **Off at "last level" (0) → the single combined write, and it lands at once.** There is no
+    preset for the device to prefer, so `{"power":"ON","brightness":n}` sticks.
+  - **Already on → a single `brightness` PUT.** Sticks immediately.
+
+  Measured 2026-08-22 with `--put`, `--get` and `--watch`. Entrance Track Lights (D36HD,
+  preset 30): `{"power":"ON","brightness":70}` → GETs read 70, 70, 70, then **30** a second and
+  a half later, with the realtime feed showing the client-id-less `{"brightness":30}` from the
+  device landing right after our write; On-then-wait-then-70 held at 70. Office Ceiling (D26HD,
+  preset 0): the same combined write held at 75 for 30 s. **An echo is not proof** — the reply
+  to a combined write reports the n the device is about to throw away. Only a GET a couple of
+  seconds later, or the device's own (client-id-less) realtime message, tells you the truth.
 - **Rooms:** `Residences/{id}/residentialRooms` → `{id, name, power, allConnected}`, in the
   app's order (`position` is null on every room). Devices carry `residentialRoomId` and
   `includeInRoomOnOff`. Room switching is `POST /api/ResidentialRooms/turnOn?id=N` (or
@@ -204,6 +225,18 @@ update) apply.
   slider runs 0…maxLevel, not minLevel…maxLevel: 0 is "off" (shown for any off dimmer, and
   dragging there sends `power: OFF` only, keeping the remembered level), anything above 0 is
   floored at `minLevel`.
+- **The room slider's knob is the minimum, and the band is the spread.** A room's (and All
+  Devices') slider sits at the lowest level among *exactly the dimmers it would move* — the
+  same `canSetLevel && connected` set as `setBrightness(ofAll:)`, with an off dimmer counting
+  as 0, so a room with one dimmer off reads 0. Not the average: the row's one gesture sets
+  every dimmer at once, so the knob has to be the level the room is at *least* at, or a small
+  nudge blasts the dim half of a room. `RangeSliderCell` then fills the track on from the knob
+  to the highest level, in 40 % accent, so the spread stays visible. Two things it is easy to get
+  wrong: the override is `drawBar(inside:flipped:)` — `drawBarInside(_:flipped:)` is the
+  obsoleted Swift 2 name and compiles to a *different*, never-called selector — and a value
+  maps to the knob's **centre**, whose travel is a knob-width shorter than the bar
+  (`rect.minX + knob/2 + f * (rect.width - knob)`); interpolating across the bar itself leaves
+  the band visibly off the knob at both ends. Check with `--dump-menu`.
 - **Shadow offset and blur are in base space.** `CGContext.setShadow` ignores the CTM, so a
   blur sized for the 1024-pt reference canvas is that many *device pixels* at every render
   size — at the 128-pt icon the body shadow ran off the bottom edge and was clipped to a hard
