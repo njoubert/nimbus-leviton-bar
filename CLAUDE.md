@@ -30,7 +30,12 @@ already found.
   never in logs (`LevitonRealtime` redacts the token frame even in `--watch`), and never in
   anything sent to GitHub (the update requests carry a User-Agent and nothing else).
 - **These are the owner's real lights.** A test that flips a device is visible in the house.
-  Prefer no-op writes (`--set Desk 100` on a lamp already on at 100 %) or ask first.
+  Prefer no-op writes (`--set Desk 100` on a lamp already on at 100 %); otherwise ask first,
+  offer a choice of device, and prefer a room that is already off. Note the device's `power`
+  *and* `brightness` before you start and put both back afterwards — `presetLevel` too if a
+  test could touch it. And give a write time to settle before believing it: a GET within
+  ~1.5 s of an On, and every HTTP echo, will happily report a level the device is about to
+  discard (see the `presetLevel` notes below).
 - **Sign-in attempts are rate-limited server-side** (`403 Too many failed attempts` locks the
   account for a while). Never loop a login; one bogus attempt to check the error path is fine.
 
@@ -302,7 +307,8 @@ app updates itself, so **every release must carry both the DMG and the zip** —
 `./build.sh release NOTES.md`, which does the whole dance and cannot forget the zip. Same as net-bar: `VERSION=` in `build.sh`, `CFBundleVersion` = commit count, `./build.sh dmg`,
 check the mounted image by eye, tag `v<VERSION>`, `gh release create`. Signing/notarization
 read `SIGN_IDENTITY` / `NOTARY_PROFILE` from a git-ignored `.signing` (the notary profile is
-per Apple ID, shared across projects). Unsigned builds need "Open Anyway" when quarantined. The release binary is arm64 only (plain
+per Apple ID, shared across projects). The signing key lives in this machine's login keychain
+and as a `.p12` export kept off it — the only two copies, and Apple will not re-issue it. Unsigned builds need "Open Anyway" when quarantined. The release binary is arm64 only (plain
 `swift build`); the installed copy in /Applications is `ditto`ed out of the DMG, not
 `build.sh install`, so it is the exact stapled artifact. When mounting a DMG to copy from it,
 use the path `hdiutil attach` prints rather than assuming `/Volumes/<name>` — a stale mount
