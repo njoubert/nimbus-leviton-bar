@@ -1,8 +1,9 @@
 # Nimbus Leviton Bar — notes for agents
 
 A macOS menu bar controller for Leviton Decora Smart Wi-Fi devices through the My Leviton
-cloud, in Swift. Pure SwiftPM, no Xcode project, and one dependency — `NimbusUpdater`, which
-is ours (`../nimbus-updater`, MIT, its own CLAUDE.md carries the updater's traps). A sibling of
+cloud, in Swift. Pure SwiftPM, no Xcode project, and exactly one dependency — `NimbusUpdater`
+(https://github.com/njoubert/nimbus-updater, MIT, ours; its own CLAUDE.md carries the updater's
+traps). A sibling of
 `../nimbus-net-bar` — same build pipeline, same conventions; its CLAUDE.md covers the shared
 traps (DMG layout, Login Items, notarization) in more depth than this one repeats.
 `README.md` is the user-facing description — read it first and keep it true when behaviour
@@ -227,7 +228,22 @@ update) apply.
 ## Auto-update (NimbusUpdater)
 
 The app checks its own GitHub releases and can replace itself. The mechanism, its trust model
-and its traps are documented in `../nimbus-updater/CLAUDE.md`; what matters *here*:
+and its traps are documented in **`../nimbus-updater/CLAUDE.md` — read it before touching
+anything about updates.** What matters *here*:
+
+- **How it is wired in: an ordinary SwiftPM package dependency, by URL.** `Package.swift` has
+  `.package(url: "https://github.com/njoubert/nimbus-updater.git", from: "1.0.0")` and the
+  target takes `.product(name: "NimbusUpdater", package: "nimbus-updater")`. **Not a git
+  submodule, and not a path dependency** — the checkout beside this repo is only where the
+  source is edited, never what gets built. SwiftPM clones it into `.build/checkouts/` and
+  `Package.resolved` (committed) pins the exact version and revision, so a build here is
+  reproducible and a new upstream tag arrives only when someone runs `swift package update`
+  and commits the result.
+- **Changing the updater means two repos.** Edit `../nimbus-updater`, `swift test` there, tag
+  it, push, then `swift package update nimbus-updater` here and commit `Package.resolved`. To
+  try a change before tagging, temporarily point `Package.swift` at
+  `.package(path: "../nimbus-updater")` — and never commit that: it would break every clone
+  that has no sibling checkout, and CI.
 
 - `Updates.swift` holds the config; `main.swift` builds the `Updater` (never in `--dump-bar`
   runs), sets `onWillRelaunch` to `store.stop()`, and hands it to `StatusBarController`, which

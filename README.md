@@ -7,7 +7,8 @@
 <p align="center">
   A macOS menu bar switch for Leviton Decora Smart Wi-Fi dimmers, switches, fan controllers and
   plugs — everything on your My Leviton account, one click away.<br>
-  No Dock icon, no window, no dependencies. Swift, SwiftPM, AppKit.
+  No Dock icon, no window. Swift, SwiftPM, AppKit — and one dependency, our own
+  <a href="https://github.com/njoubert/nimbus-updater">nimbus-updater</a>, which keeps it up to date.
 </p>
 
 <p align="center">
@@ -63,7 +64,10 @@ applies (back to its last level, or to its preset — whichever you chose in the
 Below the list: **Refresh**, with when the list was last fetched (or the last error) beside it;
 Launch at Login; the update items (below); a link to the web app; Sign Out.
 
-**Updates** — the app keeps itself current. Once a day, and when you open the menu if the last
+**Updates** — the app keeps itself current, through
+[nimbus-updater](https://github.com/njoubert/nimbus-updater) (MIT, shared with
+[Nimbus Net Bar](https://github.com/njoubert/nimbus-net-bar); it is a normal SwiftPM package
+dependency, pinned in `Package.resolved`). Once a day, and when you open the menu if the last
 check is stale, it looks for a newer release; when it finds one it downloads it in the
 background and the menu offers **Install Update 1.2.0 and Relaunch**, which takes a couple of
 seconds and puts the menu bar icon back where it was. A download is installed only if macOS
