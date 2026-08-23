@@ -207,6 +207,7 @@ enum CLI {
                 rt.onUpdate = { id, f in
                     Swift.print("\(names[id] ?? id): \(f)")
                 }
+                rt.onLive = { Swift.print($0 ? "— live —" : "— not live —") }   // what the menu reads
                 rt.start()
                 Swift.print("watching \(all.count) devices — Ctrl-C to stop")
                 RunLoop.main.run()

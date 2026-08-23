@@ -1,5 +1,6 @@
 // Copyright (C) 2026 Niels Joubert
 // SPDX-License-Identifier: GPL-3.0-or-later
+import AppKit
 import Foundation
 
 /// Owns what the menu shows: the residences and their devices, the sign-in state, and the
@@ -25,6 +26,10 @@ final class DeviceStore {
     private(set) var residences: [Residence] = []
     private(set) var email: String?
     private(set) var lastRefresh: Date?
+    /// True while the websocket is authenticated and subscribed, i.e. while changes arrive as
+    /// they happen rather than on the next poll. Device *state* only — a device added, removed
+    /// or renamed still comes from a fetch.
+    private(set) var isLive = false
     /// Last transient error (a failed command, a failed poll) — shown in the menu, cleared
     /// by the next success.
     private(set) var lastError: String?
@@ -47,6 +52,7 @@ final class DeviceStore {
     private var pollTimer: Timer?
     private var refreshTask: Task<Void, Never>?
     private var realtime: LevitonRealtime?
+    private var wakeObserver: NSObjectProtocol?
 
     /// How often to poll while the menu is closed. Each poll is one small GET per residence.
     static let pollInterval: TimeInterval = 60
@@ -76,6 +82,21 @@ final class DeviceStore {
     }
 
     // MARK: Lifecycle
+
+    init() {
+        // Sleep suspends the ping timer, and a wake usually leaves the websocket half-open with
+        // no error to notice — and whatever changed while we slept was never pushed. So: kick
+        // the feed and refetch. Nothing else in the app watches sleep or the network.
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.session != nil else { return }
+                self.realtime?.reconnectNow()
+                self.refresh()
+            }
+        }
+    }
 
     /// Pick up the saved session or password from the Keychain. Returns false when there is
     /// nothing saved and the caller should ask the user to sign in.
@@ -168,6 +189,7 @@ final class DeviceStore {
                     }
                 }
                 if out.isEmpty, !skipped.isEmpty { throw LevitonClient.Error.unauthorized }
+                checkFeedDelivered(out)
                 residences = out
                 lastRefresh = Date()
                 lastError = skipped.isEmpty ? nil : "no access to \(skipped.joined(separator: ", "))"
@@ -215,6 +237,14 @@ final class DeviceStore {
         }
     }
 
+    /// The Refresh row. Unlike the poll, this also kicks a feed that isn't live: a websocket in
+    /// its hour-long auth backoff is otherwise unreachable, and clicking Refresh is exactly the
+    /// moment someone is telling us they think the app is behind.
+    func refreshNow() {
+        if !isLive { realtime?.reconnectNow() }
+        refresh()
+    }
+
     func refreshIfStale() {
         if let t = lastRefresh, Date().timeIntervalSince(t) < Self.openRefreshMinAge { return }
         refresh()
@@ -239,6 +269,7 @@ final class DeviceStore {
         pollTimer = nil
         realtime?.stop()
         realtime = nil
+        isLive = false   // the feed's own `false` arrives too late, and `realtime` is gone
     }
 
     private func startRealtime() {
@@ -247,8 +278,48 @@ final class DeviceStore {
         rt.onUpdate = { [weak self] id, fields in   // called on the main queue
             MainActor.assumeIsolated { self?.apply(id: id, fields: fields) }
         }
+        rt.onLive = { [weak self, weak rt] live in   // also the main queue
+            MainActor.assumeIsolated {
+                // A feed we have already replaced must not report on the current one: its
+                // final `false` can land after the new one is up.
+                guard let self, let rt, self.realtime === rt, self.isLive != live else { return }
+                self.isLive = live
+                self.notify()
+            }
+        }
         rt.start()
         realtime = rt
+    }
+
+    /// The only test of *delivery* there is. A ping proves the connection is open; it says
+    /// nothing about whether My Leviton is still honouring our subscriptions, and nothing acks
+    /// a subscribe. But the poll refetches every device anyway: if it comes back with a level
+    /// or a power state we were never told about, the feed missed a change and "live" is a lie
+    /// — so drop it and reconnect.
+    ///
+    /// Only `power` and `brightness` are compared: those we know the feed reports. `connected`
+    /// is deliberately left out — a device that falls off Wi-Fi may never announce it, and that
+    /// is not the feed's fault. Devices with a write in flight are skipped, as are ones we have
+    /// not seen before.
+    ///
+    /// A change that lands *during* the fetch trips this too, since the push arrives after the
+    /// data was read. That costs one reconnect and a moment of "updated a few seconds ago",
+    /// which is the right price for catching a feed that has gone quiet.
+    private func checkFeedDelivered(_ fetched: [Residence]) {
+        guard isLive else { return }
+        let known = Dictionary(devices.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for r in fetched {
+            for d in r.devices {
+                guard inFlight[d.id] == nil, let old = known[d.id] else { continue }
+                guard old.power != d.power || old.brightness != d.brightness else { continue }
+                // %@, not the string itself: a device name is user data and can hold a %.
+                NSLog("%@", "realtime: the poll found \(d.name) at \(d.power ? "on" : "off") "
+                    + "\(d.brightness)% and the feed never said so — reconnecting")
+                isLive = false
+                realtime?.reconnectNow()
+                return
+            }
+        }
     }
 
     /// Merge a partial update (from the realtime feed) into the matching device.

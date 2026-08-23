@@ -26,6 +26,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var statusRow: TextRow?
     private var lastBar: (on: Int, summary: String, signedIn: Bool)?
     private var askingForCode = false
+    private var agoTimer: Timer?
     private var versionItem: NSMenuItem?
 
     init(store: DeviceStore, updater: Updater? = nil) {
@@ -91,9 +92,18 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menuOpen = true
         store.refreshIfStale()
         updater?.checkIfStale()
+        // "12 seconds ago" has to keep counting while the menu sits open; nothing else would
+        // redraw it until the next poll, a minute away. `.common` so it fires during tracking.
+        let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateStatusRow() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        agoTimer = t
     }
     func menuDidClose(_ menu: NSMenu) {
         menuOpen = false
+        agoTimer?.invalidate()
+        agoTimer = nil
         for v in menu.items.compactMap({ $0.view as? MenuRow }) { v.clearHover() }
     }
 
@@ -123,8 +133,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        // Refresh, with when the list was last fetched — or the last error — as its detail.
-        let status = TextRow { [weak self] in self?.store.refresh() }
+        // Refresh, with the state of the push feed — or the last error — as its detail.
+        let status = TextRow { [weak self] in self?.store.refreshNow() }
         status.isEnabled = store.isSignedIn
         menu.addItem(viewItem(status))
         statusRow = status
@@ -233,22 +243,44 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             + (store.lastError.map { "\n⚠︎ \($0)" } ?? "")
     }
 
+    /// What the row reports is the *channel*, not the clock: while the push feed is up the
+    /// rows follow every change within a second, and the age of the last fetch says nothing
+    /// about how current they are. Only when the feed is down does the fetch time matter —
+    /// that is when the 60 s poll is all there is.
     private func updateStatusRow() {
         guard let row = statusRow else { return }
+        let fetched = store.lastRefresh.map { "last fetched \(Self.ago($0))" } ?? "not fetched yet"
         if let e = store.lastError {
             row.set("Refresh", detail: "⚠︎ \(e)", warning: true)
             row.toolTip = e
-        } else if let t = store.lastRefresh {
-            row.set("Refresh", detail: "updated \(Self.clock.string(from: t))")
-            row.toolTip = "Fetched from My Leviton at \(Self.clock.string(from: t)); refreshes by itself every minute"
+        } else if store.isLive {
+            row.set("Refresh", detail: "live")
+            row.toolTip = "My Leviton's push feed is connected and answering: switching, dimming "
+                + "and drop-offs show up as they happen.\nA device added, removed or renamed "
+                + "arrives on a fetch instead — \(fetched), and again every minute."
+        } else if store.lastRefresh != nil {
+            row.set("Refresh", detail: "updated \(Self.ago(store.lastRefresh!))")
+            row.toolTip = "The push feed is not connected, so changes made elsewhere take up to a "
+                + "minute to show up here — \(fetched). Click to fetch now and reconnect it."
         } else {
             row.set("Refresh", detail: "not updated yet")
             row.toolTip = nil
         }
     }
 
-    private static let clock: DateFormatter = {
-        let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .medium; return f
+    /// "12 seconds ago", "5 minutes ago". The formatter renders anything under a second as
+    /// "in 0 seconds", and the menu refetches as it opens, so that case is the common one.
+    private static func ago(_ t: Date) -> String {
+        let age = Date().timeIntervalSince(t)
+        guard age >= 1 else { return "just now" }
+        return relative.localizedString(for: t, relativeTo: Date())
+    }
+
+    private static let relative: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        f.dateTimeStyle = .numeric   // "1 minute ago", never "last minute"
+        return f
     }()
 
     // MARK: Actions

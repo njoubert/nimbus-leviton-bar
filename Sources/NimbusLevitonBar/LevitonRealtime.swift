@@ -12,17 +12,29 @@ import Foundation
 ///   ← {"type":"notification","notification":{"event":"saved","modelName":"IotSwitch",
 ///        "modelId":<int>,"data":{ partial IotSwitch }}}
 ///
-/// A ping every 30 s keeps it alive; drops are routine and reconnect with backoff. An auth
+/// A ping every 30 s keeps it alive and must be answered within `pongTimeout` — an unanswered
+/// ping is the only thing that catches a connection that is open but no longer carrying
+/// anything. Drops are routine and reconnect with backoff, and `reconnectNow()` skips the
+/// wait. An auth
 /// rejection (close 1008, or "unauthorized" in the reason) backs off for an hour — the REST
 /// poll is the safety net, and repeated bad logins lock the account.
 ///
-/// `onUpdate` is called on the main queue.
+/// `onUpdate` and `onLive` are called on the main queue.
 final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
 
     static let url = URL(string: "wss://my.leviton.com/socket/websocket")!
     static let pingInterval: TimeInterval = 30
+    /// How long a pong may take before the connection counts as dead. `sendPing`'s completion
+    /// *is* the pong handler and has no timeout of its own, so without this a half-open
+    /// connection (a sleep, a changed network, an expired NAT mapping) sits there looking
+    /// healthy until the kernel gives up retransmitting — minutes later.
+    static let pongTimeout: TimeInterval = 10
 
     var onUpdate: ((String, LevitonClient.DeviceFields) -> Void)?
+    /// The feed went live (authenticated and subscribed) or stopped being live — a drop, an
+    /// auth rejection, `stop()`. The menu says "live" on the strength of this; the REST poll
+    /// carries on either way.
+    var onLive: ((Bool) -> Void)?
     /// Log every frame to stderr (`--watch`).
     var verbose = false
 
@@ -32,7 +44,14 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
     private lazy var urlSession = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
     private var task: URLSessionWebSocketTask?
     private var pingTimer: DispatchSourceTimer?
-    private var ready = false
+    private var pongDeadline: DispatchWorkItem?
+    private var ready = false {
+        didSet {
+            guard ready != oldValue else { return }
+            let live = ready
+            DispatchQueue.main.async { self.onLive?(live) }
+        }
+    }
     private var stopped = false
     private var backoff: TimeInterval = 1
     private var generation = 0   // bumped per connection so stale callbacks are ignored
@@ -80,6 +99,7 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
 
     private func teardown() {
         pingTimer?.cancel(); pingTimer = nil
+        pongDeadline?.cancel(); pongDeadline = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
         ready = false
@@ -87,8 +107,26 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
 
     private func reconnect(after delay: TimeInterval) {
         guard !stopped else { return }
+        let gen = generation
         log("reconnecting in \(Int(delay)) s")
-        queue.asyncAfter(deadline: .now() + delay) { [weak self] in self?.connect() }
+        queue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            // `connect()` bumps the generation, so a `reconnectNow()` in the meantime makes
+            // this one stale — firing it would kill the connection it just made.
+            guard let self, self.generation == gen else { return }
+            self.connect()
+        }
+    }
+
+    /// Reconnect at once, whatever the backoff was waiting for: a wake, or the user asking for
+    /// a refresh. This is the only way out of the hour-long auth backoff — a token that was
+    /// rejected an hour ago may well have been replaced since.
+    func reconnectNow() {
+        queue.async {
+            guard !self.stopped else { return }
+            self.log("reconnecting now")
+            self.backoff = 1
+            self.connect()
+        }
     }
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
@@ -110,6 +148,11 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
     }
 
     private func handleDrop(authFailure: Bool) {
+        // One drop, one reconnect. Tearing the task down makes every request outstanding on it
+        // fail, and each of those failures lands here: an aborted `sendPing` completion, the
+        // pending `receive`. Without this guard a single drop scheduled three reconnects and
+        // trebled the backoff (1 s → 8 s instead of 1 s → 2 s).
+        guard task != nil else { return }
         teardown()
         if authFailure {
             reconnect(after: 3600)
@@ -203,8 +246,24 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
         timer.schedule(deadline: .now() + Self.pingInterval, repeating: Self.pingInterval)
         timer.setEventHandler { [weak self] in
             guard let self, let t = self.task else { return }
-            t.sendPing { e in
-                if let e { self.queue.async { self.log("ping failed: \(e.localizedDescription)"); self.handleDrop(authFailure: false) } }
+            let gen = self.generation
+            let deadline = DispatchWorkItem { [weak self] in
+                guard let self, self.generation == gen else { return }
+                self.log("pong timed out after \(Int(Self.pongTimeout)) s")
+                self.handleDrop(authFailure: false)
+            }
+            self.pongDeadline?.cancel()
+            self.pongDeadline = deadline
+            self.queue.asyncAfter(deadline: .now() + Self.pongTimeout, execute: deadline)
+            t.sendPing { [weak self] e in
+                self?.queue.async {
+                    guard let self, self.generation == gen, t === self.task else { return }
+                    deadline.cancel()
+                    if let e {
+                        self.log("ping failed: \(e.localizedDescription)")
+                        self.handleDrop(authFailure: false)
+                    }
+                }
             }
         }
         timer.resume()

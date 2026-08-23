@@ -174,7 +174,7 @@ update) apply.
   devices.
   Timestamps are no help in forensics here: every device's `lastUpdated` bumps on a periodic
   cloud sync (all of them at once), and a redundant PUT bumps it too.
-- **Realtime:** `wss://my.leviton.com/socket/websocket` with `Origin: https://my.leviton.com`.
+- **Realtime, and how much "live" is worth:** `wss://my.leviton.com/socket/websocket` with `Origin: https://my.leviton.com`.
   Send `{"token": {id, userId, ttl, created, rememberMe}}` on open *and again on the
   `challenge` frame* (the nonce is ignored by every client); wait for
   `{"type":"status","status":"ready"}`; then
@@ -183,8 +183,36 @@ update) apply.
   "data":{partial IotSwitch}}}` — partial, merge it. Ping every 30 s; drops are routine and
   reconnect with backoff; an auth close (1008) backs off an hour. `status: ready` can arrive
   twice — the code subscribes once.
+  - **An open websocket is not a working one, and three things now guard that.** (1) A ping
+    must be answered inside `pongTimeout` (10 s): `sendPing`'s completion *is* the pong handler
+    and has no timeout of its own, so a half-open connection — sleep, a changed network, a dead
+    NAT mapping — used to look healthy until the kernel gave up retransmitting, minutes later.
+    (2) `DeviceStore.checkFeedDelivered` compares each poll against what we hold: a `power` or
+    `brightness` the feed never announced means the subscriptions are not being honoured (the
+    server never acks a `subscribe`, so nothing else can detect this) — drop `isLive` and
+    reconnect. `connected` is deliberately not compared: a device that falls off Wi-Fi may
+    never announce it. (3) `reconnectNow()` skips the backoff, from `NSWorkspace`'s wake
+    notification and from the Refresh row — the hour-long auth backoff was otherwise
+    unreachable, because `refresh()` only calls `setDeviceIds` while `realtime != nil`.
+  - **One drop must schedule exactly one reconnect.** `teardown()` fails every request
+    outstanding on the task, and each failure comes back to `handleDrop` — an aborted
+    `sendPing`, the pending `receive`. Before the `guard task != nil`, a single stall scheduled
+    three reconnects and trebled the backoff (1 s → 8 s). A scheduled reconnect also checks the
+    `generation` it was queued at, so a `reconnectNow()` in the meantime doesn't get killed by
+    the timer it pre-empted. Measured by forcing the failure: `pongTimeout` to 0.0001 and
+    `pingInterval` to 5, then `--watch`.
 - A 60 s REST poll stays on as the safety net; the menu also refreshes on open if the list is
   over 3 s old.
+- **The Refresh row reports the channel, not a clock.** `LevitonRealtime.onLive` (fired from
+  `ready`'s `didSet`, on the main queue) drives `DeviceStore.isLive`, and the row reads `live`
+  while the socket is up — the fetch time says nothing about freshness then, and the 60 s poll
+  keeps it looking recent even when the socket has been in its hour-long auth backoff all
+  along. Only when the feed is down does the row show the fetch age (`updated 47 seconds ago`,
+  `RelativeDateTimeFormatter`; under a second it says "in 0 seconds", so that case is special-
+  cased to "just now"). The age is re-rendered by a 1 s timer that runs only while the menu is
+  open (`.common` mode, or it would not fire during tracking). `--watch` prints `— live —` /
+  `— not live —` — the way to see the signal without the UI. Clicking Refresh goes through
+  `refreshNow()`, which also reconnects a feed that isn't live.
 
 ## What happens when My Leviton misbehaves (DeviceStore)
 

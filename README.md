@@ -65,8 +65,11 @@ reason shows in the status line. Turning a dimmer on sends no level, so the dimm
 applies (back to its last level, or to its preset — whichever you chose in the My Leviton app;
 [Setting up](#setting-up) suggests which, and why).
 
-Below the list: **Refresh**, with when the list was last fetched (or the last error) beside it;
-Launch at Login; the update items (below); a link to the web app; Sign Out.
+Below the list: **Refresh**, with the state of the connection beside it — `live` while My
+Leviton's push feed is up, so a switch flipped anywhere shows up here within a second;
+otherwise how long ago the list was fetched (`updated 47 seconds ago`), which is when the
+once-a-minute poll is all there is. An error takes that spot when there is one. Then Launch at
+Login; the update items (below); Sign Out.
 
 **Updates** — the app keeps itself current, through
 [nimbus-updater](https://github.com/njoubert/nimbus-updater) (MIT, shared with
@@ -84,6 +87,15 @@ itself; it offers a link to the release page instead.
 **Keeping up to date** — the list is refreshed when the menu opens (if it is more than a few
 seconds old), once a minute in the background so the bar count stays honest, and live over
 My Leviton's realtime feed when a switch is changed from the wall, the app, or a schedule.
+The feed carries a device's state, not the shape of your home: a device added, removed or
+renamed in the My Leviton app shows up on a fetch instead.
+
+`live` is checked rather than assumed. The feed is pinged every 30 seconds and has ten to
+answer; each minute's fetch is compared against what the feed has been telling us, and a light
+that changed without the feed saying so costs it the label and gets it reconnected. It also
+reconnects when the Mac wakes, and when you click **Refresh**. Whatever happens to it, the
+once-a-minute fetch is still there — a feed that dies quietly costs you up to a minute's delay,
+never a wrong reading.
 
 ## Setting up
 
