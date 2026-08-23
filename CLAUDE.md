@@ -297,7 +297,7 @@ anything about updates.** What matters *here*:
 ## Release and distribution
 
 Repo: https://github.com/njoubert/nimbus-leviton-bar — releases carry the notarized DMG
-(1.0.0, 1.1.0 and 1.1.1 shipped 2026-08-21; 1.1.2, 1.2.0 and 1.3.0 on 2026-08-22). From 1.2.0 the
+(1.0.0, 1.1.0 and 1.1.1 shipped 2026-08-21; 1.1.2, 1.2.0, 1.3.0 and 1.4.0 on 2026-08-22). From 1.2.0 the
 app updates itself, so **every release must carry both the DMG and the zip** — use
 `./build.sh release NOTES.md`, which does the whole dance and cannot forget the zip. Same as net-bar: `VERSION=` in `build.sh`, `CFBundleVersion` = commit count, `./build.sh dmg`,
 check the mounted image by eye, tag `v<VERSION>`, `gh release create`. Signing/notarization
