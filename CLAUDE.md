@@ -225,7 +225,12 @@ update) apply.
   `NSMenuItem`s and close the menu as usual.
 - **Don't rebuild the menu while it is open.** Rows update in place (`DeviceRow.device`,
   `RoomRow.update`, `TextRow.set`); structural changes wait for the next open.
-- **Slider commits on release only.** `NSSlider.isContinuous` fires per mouse move; the row
+- **Sliders snap to 5 % (`LevelControl.step`) and commit on release only.** The drag rounds to
+  the nearest step and writes it back to `slider.doubleValue`, so the knob sits in the detent
+  rather than under the mouse — verified not to disturb `NSSliderCell` tracking, which derives
+  the value from the mouse on every move. There are no `numberOfTickMarks`: visible ticks on a
+  100 pt track would be 5 pt apart and change the knob's shape. A level *reported* by a device
+  is shown as it is, unsnapped. `NSSlider.isContinuous` fires per mouse move; the row
   updates its label live and sends one PUT when `NSApp.currentEvent` is `.leftMouseUp`. The
   slider runs 0…maxLevel, not minLevel…maxLevel: 0 is "off" (shown for any off dimmer, and
   dragging there sends `power: OFF` only, keeping the remembered level), anything above 0 is

@@ -48,8 +48,9 @@ unreachable ones last:
 | 🔴 | My Leviton can't reach it (dropped off Wi-Fi); the row is disabled |
 
 Click a device to toggle it; drag a dimmer's slider and the light is set when you let go (and
-switched on, if it was off). An off dimmer reads 0 % with its slider at the bottom, as in the
-My Leviton app, and dragging a slider to 0 turns the light off. Click a **room** to switch it
+switched on, if it was off). Sliders snap to 5 % as you drag, so you land on 35 % rather than
+34 %. An off dimmer reads 0 % with its slider at the bottom, as in the My Leviton app, and
+dragging a slider to 0 turns the light off. Click a **room** to switch it
 the way the My Leviton app does — through My Leviton's own room switch, which moves every
 device in the room; the room row shows `2 of 3 on`. A room with a dimmer in it gets a slider
 of its own — as does All Devices — which sets every reachable dimmer in that room (or the

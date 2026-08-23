@@ -141,12 +141,17 @@ final class RangeSliderCell: NSSliderCell {
 }
 
 /// A slider with its percent label. `level` 0 means off; anything above is floored at
-/// `minLevel`. Dragging updates the label live; `onCommit` fires once, on release (the cloud
-/// round-trip is slow and there is no point sending thirty intermediate levels).
+/// `minLevel`. A drag snaps to multiples of `step` — nobody wants 34 % when 35 % will do —
+/// so the knob moves in detents. Dragging updates the label live; `onCommit` fires once, on
+/// release (the cloud round-trip is slow and there is no point sending thirty intermediate
+/// levels).
 @MainActor
 final class LevelControl: NSView {
     static let sliderWidth: CGFloat = 100
     static let width: CGFloat = sliderWidth + 6 + 34
+    /// Drag granularity, in percent. Only a drag snaps; a level reported by the device is
+    /// shown as it is.
+    static let step = 5
 
     var minLevel = 1
     var onCommit: ((Int) -> Void)?
@@ -203,8 +208,12 @@ final class LevelControl: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     @objc private func changed() {
-        var v = Int(slider.doubleValue.rounded())
-        if v > 0 { v = max(v, minLevel) }   // the dimmer's floor; 0 means off
+        // Snap to the nearest step, then the device's own limits: 0 means off, above it the
+        // dimmer's floor applies, and maxValue may not be a multiple of the step.
+        var v = Int((slider.doubleValue / Double(Self.step)).rounded()) * Self.step
+        v = min(v, Int(slider.maxValue))
+        if v > 0 { v = max(v, minLevel) }
+        slider.doubleValue = Double(v)      // the knob sits in the detent, not under the mouse
         percent.stringValue = "\(v)%"
         // isContinuous fires for every mouse move; the release comes as a leftMouseUp event.
         if NSApp.currentEvent?.type == .leftMouseUp {
