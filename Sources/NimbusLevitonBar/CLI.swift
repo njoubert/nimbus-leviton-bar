@@ -80,7 +80,20 @@ enum CLI {
                         fputs("value must be on, off, or 0–100\n", stderr); return 2
                     }
                     guard d.canSetLevel else { fputs("\(d.name) (\(d.model)) has no level to set\n", stderr); return 1 }
-                    fields = n == 0 ? .init(power: false) : .init(power: true, brightness: max(n, d.minLevel))
+                    if n == 0 {
+                        fields = .init(power: false)
+                    } else if d.power {
+                        fields = .init(brightness: max(n, d.minLevel))
+                    } else if d.comesOnAtPreset {
+                        // Off, with a preset of its own: On first, wait for the device to come
+                        // up and report that preset, then the level — a combined write loses to
+                        // the report. Same two-step as `DeviceStore.setBrightness`, which says why.
+                        _ = try block { try await client.update(s, deviceId: d.id, fields: .init(power: true)) }
+                        try block { try await Task.sleep(for: DeviceStore.onSettle) }
+                        fields = .init(brightness: max(n, d.minLevel))
+                    } else {
+                        fields = .init(power: true, brightness: max(n, d.minLevel))
+                    }
                 }
                 let echo = try block { try await client.update(s, deviceId: d.id, fields: fields) }
                 Swift.print("\(d.name): power=\(echo.power.map { $0 ? "ON" : "OFF" } ?? "?") brightness=\(echo.brightness.map(String.init) ?? "?")")
@@ -221,8 +234,9 @@ enum CLI {
         let state = !d.connected ? "offline" : d.power ? "ON " : "off"
         let level = d.canSetLevel ? String(format: " %3d%% (%d–%d)", d.brightness, d.minLevel, d.maxLevel) : ""
         // The flag the server ignores on room On/Off — dumped so a change of heart is visible.
+        let preset = d.comesOnAtPreset ? " preset=\(d.presetLevel.map(String.init) ?? "?")" : ""
         let room = d.includeInRoomOnOff ? "" : " includeInRoomOnOff=false"
-        return "\(state)\(level.padding(toLength: 15, withPad: " ", startingAt: 0))  \(d.name)  [\(d.kind.rawValue) \(d.model) \(d.serial) id=\(d.id)\(room)]"
+        return "\(state)\(level.padding(toLength: 15, withPad: " ", startingAt: 0))  \(d.name)  [\(d.kind.rawValue) \(d.model) \(d.serial) id=\(d.id)\(preset)\(room)]"
     }
 
     /// Run an async call to completion from synchronous top-level code.

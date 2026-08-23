@@ -37,6 +37,12 @@ final class DeviceStore {
     /// survives a fresh token is not an expired token, and repeated logins are what gets a
     /// My Leviton account locked.
     private var lastRelogin: Date?
+    /// Devices with a write in flight. Their realtime pushes are dropped: between the two PUTs
+    /// of an off→on level change the device reports its preset, which is true but is not where
+    /// it is going, and showing it makes the row jump.
+    /// Counted, not a flag: a room slider can start a second write for a device while the first
+    /// is still going, and the first one finishing must not drop the guard for the second.
+    private var inFlight: [String: Int] = [:]
     static let reloginCooldown: TimeInterval = 600
     private var pollTimer: Timer?
     private var refreshTask: Task<Void, Never>?
@@ -247,7 +253,7 @@ final class DeviceStore {
 
     /// Merge a partial update (from the realtime feed) into the matching device.
     private func apply(id: String, fields: LevitonClient.DeviceFields) {
-        guard let (ri, di) = locate(id) else { return }
+        guard inFlight[id] == nil, let (ri, di) = locate(id) else { return }
         var d = residences[ri].devices[di]
         if let p = fields.power { d.power = p }
         if let b = fields.brightness { d.brightness = b }
@@ -276,7 +282,7 @@ final class DeviceStore {
         residences[ri].devices[di].power = on
         Self.recomputeRooms(&residences[ri])
         notify()
-        send(id: id, before: before, fields: .init(power: on))
+        send(id: id, before: before, writes: [.init(power: on)])
     }
 
     /// The room switch, My Leviton's way: `turnOn`/`turnOff` moves *every* device in the room.
@@ -320,6 +326,16 @@ final class DeviceStore {
     /// power separate, and a level change on a switched-off dimmer is otherwise invisible.
     /// Level 0 is the slider's "off" and just switches the device off, leaving its remembered
     /// brightness alone.
+    ///
+    /// A dimmer that is off *and* has a preset (`comesOnAtPreset`) needs two writes, in this
+    /// order. `{power:ON, brightness:n}` in one PUT does not work for it: the cloud takes the n
+    /// and even echoes it back, but the device comes up at its own `presetLevel` and reports
+    /// *that* a beat later, overwriting n. Brightness-first-then-On fails the same way, for the
+    /// same reason — the device's report is what settles it. So: switch it on, let it report,
+    /// then set the level, and the light is visibly at its preset for that moment. A "last
+    /// level" dimmer (`presetLevel` 0) has nothing of its own to go to and takes the single
+    /// combined write, which lands immediately with no such flash. Both measured 2026-08-22 —
+    /// a D36HD at preset 30 and a D26HD at preset 0; see CLAUDE.md.
     func setBrightness(_ id: String, _ level: Int) {
         guard let (ri, di) = locate(id) else { return }
         if level <= 0 { setPower(id, on: false); return }
@@ -329,7 +345,15 @@ final class DeviceStore {
         residences[ri].devices[di].power = true
         Self.recomputeRooms(&residences[ri])
         notify()
-        send(id: id, before: before, fields: .init(power: true, brightness: clamped))
+        let writes: [LevitonClient.DeviceFields]
+        if before.power {
+            writes = [.init(brightness: clamped)]                                  // already on: just the level
+        } else if before.comesOnAtPreset {
+            writes = [.init(power: true), .init(brightness: clamped)]              // On, let it settle, then the level
+        } else {
+            writes = [.init(power: true, brightness: clamped)]                     // "last level": one write does it
+        }
+        send(id: id, before: before, writes: writes)
     }
 
     /// The room's (or, with nil, the home's) slider: every reachable dimmer to one level —
@@ -346,11 +370,27 @@ final class DeviceStore {
         }
     }
 
-    private func send(id: String, before: Device, fields: LevitonClient.DeviceFields) {
-        guard let s = session else { return }
+    /// How long a dimmer takes to come up and report its own level after an On. The report
+    /// landed 1–1.5 s after the PUT on a D36HD (2026-08-22); 2 s leaves margin without making
+    /// the correction feel detached from the drag.
+    nonisolated static let onSettle = Duration.seconds(2)
+
+    /// One or more PUTs, in order, as one optimistic write: any failure rolls the row back to
+    /// `before`, and only the **last** echo is trusted — an earlier one can be a lie (see
+    /// `setBrightness`). Realtime pushes for this device are ignored while it is in flight, so
+    /// the row doesn't bounce through the level the device passes on its way to the one asked
+    /// for.
+    private func send(id: String, before: Device, writes: [LevitonClient.DeviceFields]) {
+        guard let s = session, let first = writes.first else { return }
+        inFlight[id, default: 0] += 1
         Task {
+            defer { if let n = inFlight[id], n > 1 { inFlight[id] = n - 1 } else { inFlight[id] = nil } }
             do {
-                let updated = try await client.update(s, deviceId: id, fields: fields)
+                var updated = try await client.update(s, deviceId: id, fields: first)
+                for f in writes.dropFirst() {
+                    try await Task.sleep(for: Self.onSettle)
+                    updated = try await client.update(s, deviceId: id, fields: f)
+                }
                 if let (ri, di) = locate(id) {
                     // Trust the server's echo over our optimistic guess.
                     var d = residences[ri].devices[di]

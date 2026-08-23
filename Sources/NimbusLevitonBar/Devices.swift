@@ -23,6 +23,9 @@ struct Device: Identifiable, Equatable {
     var connected: Bool
     /// My Leviton's per-device setting: does the room's On/Off include this device?
     var includeInRoomOnOff: Bool
+    /// The level the dimmer comes up at, set in the My Leviton app: 0 means "last level".
+    /// nil when the record didn't carry it. See `comesOnAtPreset`.
+    var presetLevel: Int?
 
     /// For display only; `canSetLevel` is what decides whether a slider is shown.
     var kind: Kind {
@@ -34,6 +37,12 @@ struct Device: Identifiable, Equatable {
     }
 
     var isOn: Bool { connected && power }
+    /// True when switching this dimmer on makes it go to a level of its own, overriding a
+    /// brightness sent with the On — so the level has to be written afterwards, in a second
+    /// write (`DeviceStore.setBrightness`). "Last level" dimmers take both in one write, and
+    /// an unknown preset is treated as one, because guessing wrong the other way lands the
+    /// light on the wrong level.
+    var comesOnAtPreset: Bool { (presetLevel ?? 1) != 0 }
     var levelClamped: Int { min(max(brightness, minLevel), maxLevel) }
 }
 

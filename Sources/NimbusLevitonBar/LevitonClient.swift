@@ -216,7 +216,8 @@ final class LevitonClient: Sendable {
                       maxLevel: (j["maxLevel"] as? Int) ?? 100,
                       canSetLevel: (j["canSetLevel"] as? Bool) ?? false,
                       connected: f.connected ?? true,
-                      includeInRoomOnOff: (j["includeInRoomOnOff"] as? Bool) ?? false)
+                      includeInRoomOnOff: (j["includeInRoomOnOff"] as? Bool) ?? false,
+                      presetLevel: j["presetLevel"] as? Int)
     }
 
     /// Ids arrive as integers (occasionally strings); normalise to a string.
