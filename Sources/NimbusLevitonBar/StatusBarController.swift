@@ -349,46 +349,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         sender.state = updater.automaticChecks ? .on : .off
     }
 
-    /// The manual check always goes to the network and always says what happened — the one
-    /// place the updater is allowed to put something on screen.
+    /// The manual check always goes to the network and always says what happened; the alert
+    /// is the package's, shared with the other Nimbus apps.
     @objc private func checkForUpdates() {
         guard let updater else { return }
-        Task { @MainActor in
-            let state = await updater.checkNow()
-            let alert = NSAlert()
-            switch state {
-            case .ready(let release):
-                // Offer it here rather than sending them back to the menu for it: the download
-                // is already on disk, and this is the same call the menu item makes.
-                alert.messageText = "Update \(release.version) is ready"
-                alert.informativeText = "It takes a couple of seconds and the app comes back where it was \u{2014} or install it later from the menu."
-                alert.addButton(withTitle: "Install and Relaunch")
-                alert.addButton(withTitle: "Later")
-                NSApp.activate(ignoringOtherApps: true)
-                if alert.runModal() == .alertFirstButtonReturn { updater.installAndRelaunch() }
-                return
-            case .available(let release):
-                alert.messageText = "Version \(release.version) is available"
-                alert.informativeText = updater.canInstall
-                    ? "That release has no installable download — open its page to get it."
-                    : "Updates install only into /Applications, and this copy runs from \(Bundle.main.bundlePath)."
-                alert.addButton(withTitle: "OK")
-                alert.addButton(withTitle: "Open Release Page")
-                NSApp.activate(ignoringOtherApps: true)
-                if alert.runModal() == .alertSecondButtonReturn { updater.openReleasePage() }
-                return
-            case .failed(let message, _):
-                alert.messageText = "Could not check for updates"
-                alert.informativeText = message
-                alert.alertStyle = .warning
-            default:
-                alert.messageText = "You\u{2019}re up to date"
-                alert.informativeText = "\(Self.versionString()) is the newest release."
-            }
-            alert.addButton(withTitle: "OK")
-            NSApp.activate(ignoringOtherApps: true)
-            alert.runModal()
-        }
+        Task { @MainActor in updater.presentCheckResult(await updater.checkNow()) }
     }
 
     // MARK: Helpers

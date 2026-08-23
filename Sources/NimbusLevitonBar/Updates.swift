@@ -16,7 +16,10 @@ enum Updates {
 
     static func config(currentVersion: SemanticVersion) -> UpdaterConfig {
         UpdaterConfig(repo: repo, bundleID: bundleID, teamID: teamID, appName: appName,
-                      executableName: executableName, currentVersion: currentVersion)
+                      executableName: executableName, currentVersion: currentVersion,
+                      // Say so when the daily check finds one, rather than waiting for the menu
+                      // to be opened. Once per version; the menu row still carries it after.
+                      announcesReadyUpdates: true)
     }
 
     /// The running bundle's version — nil for the bare binary (no Info.plist), which is why

@@ -6,8 +6,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/njoubert/nimbus-updater.git",
       "state" : {
-        "revision" : "c308e01ff4b15e568ab6e91c12c81e8ef9d21bc1",
-        "version" : "1.3.0"
+        "revision" : "040c188f32271981ca25c69e1d26f5b17cfe6dff",
+        "version" : "1.4.0"
       }
     }
   ],
