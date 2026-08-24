@@ -30,11 +30,16 @@ enum Keychain {
         var ttl: TimeInterval?
 
         var expiry: Date? { ttl.map { created.addingTimeInterval($0) } }
-        /// Treat the session as stale a day before the server would, so a long-running app
-        /// re-logs in on its own schedule rather than discovering a 401 mid-click.
+        /// Treat the session as stale before the server would, so a long-running app re-logs
+        /// in on its own schedule rather than discovering a 401 mid-click. The margin is half
+        /// the ttl, capped at a day. My Leviton issues ttl 5184000 (60 days, measured
+        /// 2026-08-24), so the day is what applies in practice; the fraction only matters if
+        /// the server ever hands back a short ttl, where a flat day would make the session
+        /// stale the moment it was issued — a login per app launch and per CLI command, and
+        /// repeated logins are what lock an account.
         var isFresh: Bool {
-            guard let e = expiry else { return true }
-            return Date() < e.addingTimeInterval(-86_400)
+            guard let e = expiry, let ttl else { return true }
+            return Date() < e.addingTimeInterval(-min(86_400, ttl / 2))
         }
     }
 
@@ -82,6 +87,20 @@ enum Keychain {
          kSecAttrAccount as String: account]
     }
 
+    /// Why the last read came back empty, when it was not simply "no such item". A
+    /// non-interactive process (a coding agent, ssh, a script) cannot be shown the "allow
+    /// access" panel, so `SecItemCopyMatching` fails instead of prompting and the CLI would
+    /// otherwise report a perfectly good Keychain as "not signed in".
+    private(set) static var lastReadFailure: OSStatus?
+
+    /// A clause to append to "not signed in" when the Keychain, not the absence of an item,
+    /// is what went wrong.
+    static var readFailureHint: String {
+        guard let s = lastReadFailure else { return "" }
+        return " (the Keychain refused this process: \(Error(status: s)) — a non-interactive"
+            + " shell cannot be prompted for access; put the login in a .leviton file instead)"
+    }
+
     /// Returns the item's data, plus (for the login) the email we stashed in the comment.
     private static func read(_ account: String, wantAccountFromItem: Bool) -> (String, Data)? {
         var q = baseQuery(account)
@@ -90,6 +109,7 @@ enum Keychain {
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: CFTypeRef?
         let status = SecItemCopyMatching(q as CFDictionary, &out)
+        if status != errSecSuccess && status != errSecItemNotFound { lastReadFailure = status }
         guard status == errSecSuccess, let dict = out as? [String: Any],
               let data = dict[kSecValueData as String] as? Data else { return nil }
         let email = (dict[kSecAttrComment as String] as? String) ?? ""

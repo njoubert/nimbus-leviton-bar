@@ -31,16 +31,31 @@ enum CLI {
                     fputs("no password given\n", stderr); return 2
                 }
                 let s = try block { try await client.login(email: email, password: password) }
-                try Keychain.saveLogin(.init(email: email, password: password))
-                try Keychain.saveSession(s)
-                Swift.print("signed in as user \(s.userId); login and session saved to the Keychain")
+                // With a credentials file in play the Keychain is out of the picture: the
+                // login is already on disk there, so only the session token is worth caching.
+                if let dev = DevCredentials.load() {
+                    dev.saveSession(s)
+                    Swift.print("signed in as user \(s.userId); session cached in \(dev.sessionFile.path)")
+                    Swift.print("(the login comes from \(dev.source); the Keychain was not touched)")
+                } else {
+                    try Keychain.saveLogin(.init(email: email, password: password))
+                    try Keychain.saveSession(s)
+                    Swift.print("signed in as user \(s.userId); login and session saved to the Keychain")
+                }
                 if let e = s.expiry { Swift.print("session expires \(e)") }
 
             case .logout:
-                if let s = Keychain.loadSession() { block { await client.logout(s) } }
-                Keychain.deleteSession()
-                Keychain.deleteLogin()
-                Swift.print("signed out; Keychain entries removed")
+                if let dev = DevCredentials.load() {
+                    // The credentials file is the user's own; only the cached token is ours.
+                    if let s = dev.loadSession() { block { await client.logout(s) } }
+                    dev.deleteSession()
+                    Swift.print("signed out; \(DevCredentials.sessionFileName) removed, \(dev.source) left alone")
+                } else {
+                    if let s = Keychain.loadSession() { block { await client.logout(s) } }
+                    Keychain.deleteSession()
+                    Keychain.deleteLogin()
+                    Swift.print("signed out; Keychain entries removed")
+                }
 
             case .print:
                 let s = try session(client)
@@ -221,10 +236,21 @@ enum CLI {
 
     /// The saved session, or a fresh one from the saved password. Tells the user what to do
     /// when there is neither.
+    ///
+    /// A `.leviton` credentials file, when there is one, replaces the Keychain for the CLI
+    /// (see `DevCredentials`) — including the cached token, so this does not log in once per
+    /// command, which is what locks a My Leviton account.
     private static func session(_ client: LevitonClient) throws -> Keychain.Session {
+        if let dev = DevCredentials.load() {
+            if let s = dev.loadSession(), s.isFresh { return s }
+            let s = try block { try await client.login(email: dev.login.email, password: dev.login.password) }
+            dev.saveSession(s)
+            fputs("signed in as \(dev.login.email) from \(dev.source); session cached in \(DevCredentials.sessionFileName)\n", stderr)
+            return s
+        }
         if let s = Keychain.loadSession(), s.isFresh { return s }
         guard let login = Keychain.loadLogin() else {
-            throw LevitonClient.Error.message("not signed in — run with --login EMAIL first")
+            throw LevitonClient.Error.message("not signed in — run with --login EMAIL first\(Keychain.readFailureHint)")
         }
         let s = try block { try await client.login(email: login.email, password: login.password) }
         try? Keychain.saveSession(s)

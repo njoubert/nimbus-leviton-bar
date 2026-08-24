@@ -154,6 +154,12 @@ for checking what the account returns):
 .build/debug/NimbusLevitonBar --logout
 ```
 
+In a shell that cannot be prompted for Keychain access — an ssh session, a cron job — those
+commands report "not signed in" however good the Keychain entries are. Put `MYLEVITON_EMAIL`
+and `MYLEVITON_PASSWORD` in a `.leviton` file in the working directory (`chmod 600`; it is
+git-ignored) and the command line, and only the command line, signs in from that instead. The
+app itself never reads it.
+
 ## Distribution
 
 `./build.sh dmg` makes the usual disk image: the app, an Applications folder to drag it onto,

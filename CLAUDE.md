@@ -28,7 +28,9 @@ already found.
   auto-updater (`NimbusUpdater`, see below). Nothing else, ever, and README must keep saying
   exactly this. Secrets live in the Keychain only (`Keychain.swift`) — never in UserDefaults,
   never in logs (`LevitonRealtime` redacts the token frame even in `--watch`), and never in
-  anything sent to GitHub (the update requests carry a User-Agent and nothing else).
+  anything sent to GitHub (the update requests carry a User-Agent and nothing else). **The
+  one exception is the CLI's `.leviton` file** (`DevCredentials.swift`), below — the app never
+  reads it, and it is git-ignored.
 - **These are the owner's real lights.** A test that flips a device is visible in the house.
   Prefer no-op writes (`--set Desk 100` on a lamp already on at 100 %); otherwise ask first,
   offer a choice of device, and prefer a room that is already off. Note the device's `power`
@@ -51,6 +53,7 @@ Sources/NimbusLevitonBar/
   DeviceStore.swift       @MainActor state: sign-in, devices, optimistic writes, 60 s poll
   Devices.swift           Device / Residence value types
   Keychain.swift          login (email+password) and session (token) as generic-password items
+  DevCredentials.swift    the CLI-only .leviton login file and its cached session token
   SignInDialog.swift      NSAlert with email/password fields; the 2FA code prompt
   StatusBarController.swift  the status item (lightbulb + count), the menu
   MenuRows.swift          the view-based rows (device / room / text), the shared LevelControl
@@ -94,6 +97,30 @@ queue, which `DeviceStore` enters with `MainActor.assumeIsolated`. `LevitonClien
 No unit tests; `--print` and `--watch` are the correctness checks. The CLI and the app share
 the Keychain items, so once either has signed in the other works.
 
+**A non-interactive shell cannot read the Keychain, and the CLI has a way round it.** An agent,
+an ssh session or a cron job gets `errSecInteractionNotAllowed` ("User interaction is not
+allowed") from `SecItemCopyMatching` instead of the access panel, so every command reported
+`not signed in` with both items sitting right there — and `codesign` fails the same way
+(`errSecInternalComponent`), leaving `./build.sh build` binaries on their previous signature.
+So the CLI, and only the CLI, takes the login from a git-ignored `.leviton` in the working
+directory when one exists (`DevCredentials.swift`):
+
+```
+MYLEVITON_EMAIL=you@example.com
+MYLEVITON_PASSWORD=…                # chmod 600 — it warns if the file is readable by others
+```
+
+`MYLEVITON_EMAIL`/`MYLEVITON_PASSWORD` in the environment win over the file and suffice on
+their own; `MYLEVITON_ENV` names a file elsewhere. The session token is cached in
+`.leviton-session.json` (0600, git-ignored) beside it — **this must never become a login per
+command**, which is what locks an account. `--login` and `--logout` write and clear that cache
+instead of the Keychain items, and leave `.leviton` itself alone. `Keychain.readFailureHint`
+now puts the real `OSStatus` in the "not signed in" message, so the diagnosis is in the error.
+
+`Session.isFresh` keeps a margin of **half the ttl, capped at a day** (it was a flat day) —
+same behaviour at the real ttl, and a guard if the server ever hands back a short one, where a
+flat day would make a session stale the instant it was issued and log in once per command.
+
 **Inspecting the menu** goes through the accessibility API (needs Accessibility permission for
 the terminal; screen capture is a separate permission and may not be granted):
 
@@ -122,7 +149,7 @@ the official web bundle, then verified live against this account in Aug 2026 (`a
 update) apply.
 
 - **Login:** `POST /api/Person/login?include=user` with `{email, password}` (+ `code` for 2FA)
-  → `{id: <token>, ttl: 86400-ish, created, userId}`. The token goes in
+  → `{id: <token>, ttl, created, userId}`; the ttl is 5184000 (60 days), measured 2026-08-24. The token goes in
   `Authorization: <token>` — bare, no `Bearer`. Errors: 401 `LoginFailureError` (bad
   password), 403 "Too many failed attempts", 406 "requires code" (2FA), 408 bad code.
 - **Residences:** `Person/{userId}/residentialPermissions` → each has `residentialAccountId`
