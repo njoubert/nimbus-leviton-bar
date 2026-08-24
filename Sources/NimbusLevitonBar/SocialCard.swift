@@ -177,7 +177,7 @@ enum SocialCard {
         guard let ctx = CGContext(data: nil, width: Int(width), height: Int(height),
                                   bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else {
             throw Failure("cannot make the bitmap")
         }
         ctx.setAllowsAntialiasing(true)
