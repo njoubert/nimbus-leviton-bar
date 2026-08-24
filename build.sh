@@ -68,6 +68,12 @@ print_success() { printf '%s✓ %s%s\n' "$green" "$*" "$reset"; }
 print_warning() { printf '%s⚠ %s%s\n' "$yellow" "$*" "$reset" >&2; }
 print_error()   { printf '%s✗ %s%s\n' "$red" "$*" "$reset" >&2; }
 print_info()    { printf '  %s\n' "$*"; }
+print_done()    { printf '\n%s%s\n✓ %s\n%s%s\n\n' "$green" "$rule" "$*" "$rule" "$reset"; }
+print_failed()  { printf '\n%s%s\n✗ %s\n%s%s\n\n' "$red" "$rule" "$*" "$rule" "$reset" >&2; }
+
+# What the closing banner says on success; commands set it to something better than their name.
+RESULT=""
+result() { RESULT=$1; }
 
 # What the script is doing, for the failure message. `set -e` exits with whatever the failing
 # command printed, which for ditto, hdiutil and osascript is often nothing at all — a release
@@ -84,7 +90,6 @@ on_error() {
     print_info "the tag $tagged_here was created by this run; nothing was pushed or published" >&2
     print_info "re-run to resume, or: git tag -d $tagged_here" >&2
   fi
-  release_lock
   exit "$code"
 }
 
@@ -312,9 +317,16 @@ cmd="${1:-build}"
 cmd_name="./build.sh $cmd"
 [ $# -gt 0 ] && shift
 
+on_exit() {
+  local code=$?
+  release_lock
+  if [ "$code" -eq 0 ]; then print_done "${RESULT:-$cmd_name}"
+  else print_failed "${RESULT:-$cmd_name} — exit $code"; fi
+}
+
 trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR
-trap 'release_lock' EXIT
-trap 'print_error "interrupted during ${STAGE:-$cmd_name}"; release_lock; exit 130' INT TERM
+trap 'on_exit' EXIT
+trap 'print_error "interrupted during ${STAGE:-$cmd_name}"; exit 130' INT TERM
 
 case "$cmd" in
   build|run|app|dmg|install|release|icon|social|clean) acquire_lock "$cmd_name" ;;
@@ -366,6 +378,7 @@ case "$cmd" in
     stage "building the disk image"; make_dmg "$REL_APP" "$DMG"
     stage ""
     print_success "built $DMG"
+    result "built $DMG"
     print_info "Test it: open $DMG"
     ;;
 
@@ -418,11 +431,13 @@ case "$cmd" in
       gh release create "$tag" "$DMG" "$ZIP" --title "$VERSION" --notes-file "$notes"
       stage ""
       print_success "published $tag"
+      result "published $tag — $(gh release view "$tag" --json url --jq .url 2>/dev/null || echo "$tag")"
     else
       print_warning "gh is not installed; publish by hand:"
       print_info "gh release create $tag $DMG $ZIP --title $VERSION --notes-file $notes"
+      print_info "both files: the updater cannot see a release that carries only the DMG"
+      result "built and tagged $tag — publish it by hand with the line above"
     fi
-    print_info "the updater needs $(basename "$ZIP") on the release — a DMG-only release is invisible to it"
     ;;
 
   install)
@@ -482,7 +497,7 @@ case "$cmd" in
         print_warning "updates: $INSTALL_DIR is not writable by you — the app will only link to the release page"
       fi
       for stray in "$INSTALL_DIR/.$NAME-old.app" "$INSTALL_DIR/.$NAME-update.app"; do
-        [ -e "$stray" ] && print_warning "left over from an update: $stray"
+        if [ -e "$stray" ]; then print_warning "left over from an update: $stray"; fi
       done
     else
       print_info "not installed in $INSTALL_DIR"

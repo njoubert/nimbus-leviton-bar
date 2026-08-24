@@ -21,7 +21,9 @@ already found.
   an `if`). Never disable a hook to get past it.
 - **Script output follows `../weshootfilm/provision.sh`.** `print_header` for a section,
   `print_success` (✓), `print_warning` (⚠), `print_error` (✗), `print_info` for indented
-  detail. The headline carries the glyph and detail lines sit indented under it; warnings and
+  detail, and a closing `print_done` / `print_failed` banner that every run ends on (the EXIT
+  trap prints it, so no command can end on an ambiguous note — `result "…"` sets what the
+  green one says). The headline carries the glyph and detail lines sit indented under it; warnings and
   errors go to stderr (provision.sh puts them on stdout) so a failure survives a pipe. An ERR
   trap names the failing stage — `stage "…"` before anything long, since `ditto`, `hdiutil`
   and `osascript` fail silently and `set -e` would exit with nothing printed.

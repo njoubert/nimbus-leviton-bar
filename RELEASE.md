@@ -111,6 +111,9 @@ FAILED: building the disk image — exit 1 at build.sh line 348
   command: ditto /nonexistent/app dist/boom
 ```
 
+Every run also ends on a banner — green with what it produced, red with the exit code — so a
+finished release never has to be inferred from the last line of output.
+
 `ditto`, `hdiutil` and `osascript` often fail without printing anything, and `set -e` then
 exits quietly — a release once died at the disk-image step and looked exactly like one that
 had finished. The trap exists so that cannot happen again.
