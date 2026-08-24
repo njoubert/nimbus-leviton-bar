@@ -19,6 +19,12 @@ already found.
 - **`prek` (pre-commit) must pass.** `prek install` once, then `prek run --all-files` before
   claiming done. Shellcheck runs at its default severity (`A && B || true` is flagged — write
   an `if`). Never disable a hook to get past it.
+- **Script output follows `../weshootfilm/provision.sh`.** `print_header` for a section,
+  `print_success` (✓), `print_warning` (⚠), `print_error` (✗), `print_info` for indented
+  detail. The headline carries the glyph and detail lines sit indented under it; warnings and
+  errors go to stderr (provision.sh puts them on stdout) so a failure survives a pipe. An ERR
+  trap names the failing stage — `stage "…"` before anything long, since `ditto`, `hdiutil`
+  and `osascript` fail silently and `set -e` would exit with nothing printed.
 - **Licence headers.** Every new Swift file starts with
   `// Copyright (C) 2026 Niels Joubert` / `// SPDX-License-Identifier: GPL-3.0-or-later`.
   GPL-3.0-or-later; don't vendor code under an incompatible licence.

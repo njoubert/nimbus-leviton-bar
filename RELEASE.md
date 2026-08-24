@@ -104,12 +104,34 @@ by hand is what gets it wrong.
 
 ## If it stops partway
 
-The tag is created locally before anything is built, so a failure usually leaves it behind.
-Re-running is safe — an existing tag that points at `HEAD` is accepted. If the tag is on the
-wrong commit and hasn't been pushed, `git tag -d v<version>` and start again.
+It says so, in red, naming the stage it was in and the command that failed:
+
+```
+FAILED: building the disk image — exit 1 at build.sh line 348
+  command: ditto /nonexistent/app dist/boom
+```
+
+`ditto`, `hdiutil` and `osascript` often fail without printing anything, and `set -e` then
+exits quietly — a release once died at the disk-image step and looked exactly like one that
+had finished. The trap exists so that cannot happen again.
+
+If the run had already tagged, the message says so and nothing was pushed:
+
+```
+  the tag v1.6.0 was created by this run and nothing was pushed or published.
+  re-run to resume, or: git tag -d v1.6.0
+```
+
+Re-running is safe — an existing tag pointing at `HEAD` is accepted. If you have committed
+since, the tag is on the wrong commit and the script refuses; `git tag -d v<version>` and run
+again (it is only local until the script pushes it).
 
 If it pushed and then `gh` failed, the artifacts are already in `dist/` — publish by hand with
 the line the script prints.
+
+**Never run two `build.sh` commands at once.** They share `dist/`, and `make_bundle` deletes
+the app bundle another run may be reading. The script now takes a lock and refuses the second
+one rather than letting them corrupt each other.
 
 ## Afterwards
 
