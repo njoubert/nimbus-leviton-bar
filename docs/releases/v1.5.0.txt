@@ -1,0 +1,14 @@
+Sliders that stop on the fives, and a Refresh row that tells you the truth.
+
+Dragging a dimmer now snaps to 5 %, so you land on 35 % rather than 34 %. The knob sits in the notch as you drag; a level set somewhere else is still shown exactly as it is.
+
+The **Refresh** row used to show when the app last fetched the list, which said nothing about how current the lights actually are — the app also keeps a live connection to My Leviton, and a switch flipped at the wall shows up here in about a second. So the row now reports that connection instead: **live** while it is up, and how long ago the list was fetched (`updated 47 seconds ago`) when it is not.
+
+And that word had to be worth something. The connection is pinged every 30 seconds and has ten to answer, so one that has quietly stopped carrying anything — after a sleep, or a change of network — is spotted in seconds rather than minutes. Each minute's fetch is checked against what the connection has been telling us, and a light that changed without it saying so costs it the label and gets it reconnected. It reconnects when your Mac wakes, too, and when you click **Refresh** — which is now the way out of a connection that had given up for the hour.
+
+Underneath all of it the once-a-minute fetch is unchanged, so a connection that dies quietly costs you a little delay, never a wrong reading.
+
+**Open My Leviton on the Web** is gone from the menu.
+
+Signed with a Developer ID and notarized. Requires macOS 15 and Apple silicon.
+

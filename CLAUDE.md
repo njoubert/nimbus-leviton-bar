@@ -385,8 +385,9 @@ anything about updates.** What matters *here*:
   `updaterChanged()` only retitles the version line while the menu is open; new items appear on
   the next open.
 - **A release is invisible to the updater unless it carries `NimbusLevitonBar-<version>.zip`,**
-  built by `build.sh dmg` from the *stapled* app. `./build.sh release NOTES.md` does the whole
-  dance (tag, build, push, publish both artefacts) and is the way to ship from now on.
+  built by `build.sh dmg` from the *stapled* app. `./build.sh release [RELEASE_NOTES_FILE]`
+  does the whole dance (tag, build, push, publish both artifacts) and is the way to ship from
+  now on.
 - Testing an update without publishing one: `defaults write com.njoubert.nimbuslevitonbar
   updateFeedURL file:///tmp/latest.json`, a JSON in the API's shape whose asset URL is a local
   `file://` zip. `defaults delete` it afterwards. The full manual plan is in
@@ -399,7 +400,8 @@ anything about updates.** What matters *here*:
 Repo: https://github.com/njoubert/nimbus-leviton-bar — releases carry the notarized DMG
 (1.0.0, 1.1.0 and 1.1.1 shipped 2026-08-21; 1.1.2, 1.2.0, 1.3.0 and 1.4.0 on 2026-08-22). From 1.2.0 the
 app updates itself, so **every release must carry both the DMG and the zip** — use
-`./build.sh release NOTES.md`, which does the whole dance and cannot forget the zip. Same as net-bar: `VERSION=` in `build.sh`, `CFBundleVersion` = commit count, `./build.sh dmg`,
+`./build.sh release [RELEASE_NOTES_FILE]`, which does the whole dance and cannot forget
+the zip. Same as net-bar: `VERSION=` in `build.sh`, `CFBundleVersion` = commit count, `./build.sh dmg`,
 check the mounted image by eye, tag `v<VERSION>`, `gh release create`. Signing/notarization
 read `SIGN_IDENTITY` / `NOTARY_PROFILE` from a git-ignored `.signing` (the notary profile is
 per Apple ID, shared across projects). The signing key lives in this machine's login keychain

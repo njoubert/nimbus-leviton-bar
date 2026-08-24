@@ -1,0 +1,14 @@
+Nimbus Leviton Bar now keeps itself up to date.
+
+Once a day — and when you open the menu, if the last check is stale — it asks GitHub for the newest release. If there is one it downloads it in the background, and the menu offers **Install Update … and Relaunch**: a click, a couple of seconds, and the menu bar icon is back where it was, signed in, with Launch at Login intact.
+
+A download is installed only if macOS confirms it is signed with the same Developer ID and bundle identifier as the copy you are running. A tampered or unsigned download is deleted, not installed — the worst anyone who interferes with the release can achieve is stopping updates from happening, not replacing your app. Nothing installs without your click, and a copy running from anywhere but /Applications (from the disk image, say) never replaces itself; it points at this page instead.
+
+**Check for Updates…** asks immediately and tells you what it found. **Check for Updates Automatically**, in the same menu, turns the whole thing off — with it off, the app never contacts GitHub. The update requests carry no account information: the app's name and version, and nothing else. Everything about your lights still goes to my.leviton.com and nowhere else.
+
+Also in this release: `--check-update` on the command line shows what the updater sees, and `build.sh` gained a `release` command so a release can no longer be published without the file the updater needs.
+
+The updater itself is a separate, MIT-licensed package: https://github.com/njoubert/nimbus-updater
+
+Signed with a Developer ID and notarized. Requires macOS 15 and Apple silicon.
+

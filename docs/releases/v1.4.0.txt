@@ -1,0 +1,10 @@
+Updates tell you they're here, and install from where they tell you.
+
+When a background check finds a new version, the app now says so — a small window with **Install and Relaunch** on it — instead of quietly marking the version line and waiting for you to open the menu. It says it once per version: choose **Later** and it won't ask again about that one, though the menu keeps offering it.
+
+**Check for Updates…** gained the same button. It used to tell you a new version was ready and then ask you to go and find the menu item that installs it; now the thing that tells you is the thing that does it. Return installs, Escape defers.
+
+Under the hood that dialog moved into [nimbus-updater](https://github.com/njoubert/nimbus-updater), so it is now one piece of code shared with Nimbus Net Bar and Nimbus DMX Helper rather than three copies quietly drifting apart.
+
+Signed with a Developer ID and notarized. Requires macOS 15 and Apple silicon.
+

@@ -1,0 +1,10 @@
+Two changes to how levels work.
+
+**A room's slider now sits at the lowest of its dimmers, not their average.** A room with one bright light and the rest dim used to read as bright, so a small nudge upward would drag the dim ones up with it. The knob is now the level the whole room is at *least* at — an off dimmer counts as 0 — and a lighter band carries on from the knob to the highest level in the room, so you can still see how far up the rest of it goes. **All Devices** works the same way.
+
+**Dragging a dimmer from off to a level now lands on that level.** It used to end up wherever that dimmer's own preset was: setting an off light to 40% could turn it on at 100% and leave it there. The dimmer comes up at its preset before anything the cloud says can reach it, so the app now sets the level a moment after switching it on, and the light settles where you asked.
+
+That second one is worth a setting of your own. In the My Leviton app a dimmer can either come back on at the level it was last at, or come on at a fixed preset level. Choose "last level" and this app sets an off dimmer in a single request, arriving at the level directly with no detour. Dimmers with a fixed preset still work — they just take a moment longer, and the light is briefly at its preset on the way. `--print` marks the ones that have a preset.
+
+Signed with a Developer ID and notarized. Requires macOS 15 and Apple silicon.
+

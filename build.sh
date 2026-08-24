@@ -9,6 +9,10 @@
 #   ./build.sh app          release build → dist/NimbusLevitonBar.app (ad-hoc signed, icon baked in)
 #   ./build.sh dmg          release build → dist/NimbusLevitonBar-<version>.dmg, the drag-to-Applications
 #                           disk image (background drawn by Sources/NimbusLevitonBar/DMGBackground.swift)
+#   ./build.sh release [RELEASE_NOTES_FILE]
+#                           the whole ship: tag, build the DMG and the zip, notarize, preflight,
+#                           push, and publish the GitHub release. The notes default to
+#                           docs/releases/v<version>.txt, which must exist. See RELEASE.md.
 #   ./build.sh install      release build → /Applications/NimbusLevitonBar.app (replacing any older
 #                           copy), launch it, and register it to launch at login
 #   ./build.sh uninstall    unregister the login item, quit, delete /Applications/NimbusLevitonBar.app
@@ -33,13 +37,14 @@ cd "$(dirname "$0")"
 NAME=NimbusLevitonBar          # executable / target / process name
 APP_NAME="Nimbus Leviton Bar"  # what the user sees: the .app, the volume, Login Items
 BUNDLE_ID=com.njoubert.nimbuslevitonbar
-VERSION=1.5.0
+VERSION=1.6.0
 INSTALL_DIR=/Applications
 INSTALLED="$INSTALL_DIR/$APP_NAME.app"
 DEV_APP="dist/debug/$APP_NAME.app"
 REL_APP="dist/$APP_NAME.app"
 DMG="dist/$NAME-$VERSION.dmg"
 ZIP="dist/$NAME-$VERSION.zip"     # what the auto-updater downloads; see docs/autoupdate-plan.md
+NOTES="docs/releases/v$VERSION.txt"  # the release body, committed; one file per version
 
 # Developer ID signing / notarization, off unless configured (see the header).
 SIGN_IDENTITY="${SIGN_IDENTITY:-}"
@@ -296,12 +301,16 @@ case "$cmd" in
     note "Test it: open $DMG"
     ;;
 
-  # Everything a release needs, in the order the notes say: build both artefacts, tag, publish.
+  # Everything a release needs, in the order the notes say: build both artifacts, tag, publish.
   # Refuses to publish from a dirty tree or a commit that is not the version's tag.
   release)
-    notes=${1:-}
-    if [ -z "$notes" ] || [ ! -f "$notes" ]; then
-      warn "usage: ./build.sh release NOTES.md   (the GitHub release body)"
+    # The body is docs/releases/v<VERSION>.txt unless another file is named, so the notes for
+    # every release are in the history rather than in someone's scratch directory. (.txt, not
+    # .md, though the content is markdown: they are payloads, and editors lint .md files.)
+    notes=${1:-$NOTES}
+    if [ ! -s "$notes" ]; then
+      warn "no release notes at $notes"   # -s, so an empty stub counts as missing
+      note "write them there and commit them, then run this again (see RELEASE.md)"
       exit 2
     fi
     if [ -n "$(git status --porcelain)" ]; then

@@ -1,0 +1,4 @@
+Fixes the app icon's drop shadow, which was clipped into a hard line at the bottom at the size shown in the disk image window and in Finder. (Core Graphics shadow blur is in device pixels, not canvas units — it is now scaled with the render size.) No functional changes.
+
+Signed with a Developer ID and notarized. Requires macOS 15 and Apple silicon.
+

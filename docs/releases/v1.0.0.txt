@@ -1,0 +1,11 @@
+First release. A menu bar switch for everything on your My Leviton account.
+
+- **In the bar:** a lightbulb with the number of devices that are on; hover for the tally (`6 of 13 on · 3 offline`).
+- **In the menu:** your rooms in My Leviton's order, each device under its room — click to toggle, drag a dimmer's slider to set its level (0 = off). Rooms with dimmers get a slider that dims the whole room; **All Devices** at the top is the master switch and whole-home dimmer. The menu stays open while you work.
+- **Room On/Off** does what the My Leviton app does (the devices that opt in to room On/Off); devices that sit it out are marked with a ring.
+- **Live:** changes from the wall, the phone app or a schedule show up as they happen, over My Leviton's realtime feed; the list also refreshes once a minute and whenever the menu opens.
+- **Account:** sign in once with your My Leviton email and password; both, and the session token, live in your Keychain. The app talks to `my.leviton.com` and nothing else.
+- **Launch at Login** is registered on the first launch from `/Applications` (once; turning it off sticks).
+
+Signed with a Developer ID and notarized, so it opens straight from the download. Requires macOS 15 and Apple silicon (this build is arm64 only).
+

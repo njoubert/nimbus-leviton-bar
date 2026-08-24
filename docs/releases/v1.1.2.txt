@@ -1,0 +1,7 @@
+Fixes the room switch. My Leviton's own room On/Off moves **every** device in the room — the per-device "include in room on/off" flag is not honoured by the server (verified against a live account, and Leviton's own web app never reads it either). The menu used to believe that flag: clicking a room flipped only some of the rows, and the tooltip claimed the rest would sit it out, until the next refresh a moment later showed the lights that had actually moved.
+
+Now a room click flips every device in the room straight away, and the mark for opted-out devices — a ring around the dot — is gone, along with the tooltip text that explained it. The room, device and All Devices tooltips are shorter throughout.
+
+Also adds two CLI flags for poking at the API: `--room NAME on|off` (drives the room switch and prints the room before and after) and `--put PATH JSON` (the raw counterpart to `--get`).
+
+Signed with a Developer ID and notarized. Requires macOS 15 and Apple silicon.

@@ -1,0 +1,12 @@
+Polish on top of 1.0.0, from a day of using it.
+
+- **All Devices** is now a proper master row at the top: a dot (green when anything is on, hollow when all off, red when nothing is reachable or the last request failed), the tally, and a slider that dims every dimmer in the home.
+- **Room sliders:** a room with a dimmer gets a slider that dims the whole room. Sliders show the average level of the dimmers that are on; 0 switches them off.
+- **Off dimmers read 0 %** with the slider at the bottom, as in the My Leviton app; turning one back on still follows your Leviton setting (last level or preset), since a toggle sends no level.
+- **Ordering:** unreachable devices sink to the bottom of their room, and rooms where nothing is reachable sink to the bottom of the list.
+- **Refresh** is a normal command row with "updated 11:21:58 PM" (or the last error) beside it, aligned with the items below it.
+- **Sturdier error handling:** a token that keeps being rejected no longer re-logs in in a loop (that is how accounts get locked); a residence the account cannot see is skipped instead of failing the whole list; Retry after a failed sign-in actually retries.
+- Paste works in the sign-in dialog; README has a screenshot.
+
+Signed with a Developer ID and notarized. Requires macOS 15 and Apple silicon.
+
