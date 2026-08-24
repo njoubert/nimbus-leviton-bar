@@ -1,0 +1,7 @@
+Rooms now properly in your sorted order.
+
+We were listing rooms in whatever order the Leviton API returned it. 
+This API is undocumented and we rely on the community and our own efforts to reverse-engineer it.
+We noticed the ordering of the rooms are not the same as the order we set in the Leviton control panes, so we went hunting. 
+We discovered that the room ordering is separately communicated as a user preference, which we now read.
+You should see your rooms now in the proper order!
