@@ -59,13 +59,17 @@ enum CLI {
 
             case .print:
                 let s = try session(client)
+                // Same order the menu shows, so this stays the way to check it.
+                let orders = try block { try await client.roomOrders(s) }
                 for r in try block({ try await client.residences(s) }) {
                     Swift.print("\(r.name)  [residence \(r.id)]")
                     let ds = try block { try await client.devices(s, residenceId: r.id) }
                         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
                     let rooms = try block { try await client.rooms(s, residenceId: r.id) }
-                    let res = Residence(id: r.id, name: r.name, rooms: rooms, devices: ds)
+                    let res = Residence(id: r.id, name: r.name, rooms: rooms, devices: ds,
+                                        roomOrder: orders[r.id] ?? [])
                     if ds.isEmpty { Swift.print("    (no devices)") }
+                    if orders[r.id] == nil { Swift.print("    (no room order saved — rooms in id order)") }
                     for room in res.displayRooms {
                         let inRoom = res.displayDevices(in: room)
                         Swift.print("  \(room.name)  [room \(room.id), \(room.power ? "ON" : "off"), \(inRoom.count) devices]")
@@ -122,7 +126,7 @@ enum CLI {
                     let rooms = try block { try await client.rooms(s, residenceId: r.id) }
                     let ds = try block { try await client.devices(s, residenceId: r.id) }
                     if let room = rooms.first(where: { $0.id == which || $0.name.caseInsensitiveCompare(which) == .orderedSame }) {
-                        found = (Residence(id: r.id, name: r.name, rooms: rooms, devices: ds), room)
+                        found = (Residence(id: r.id, name: r.name, rooms: rooms, devices: ds), room)  // order irrelevant here
                         break
                     }
                 }

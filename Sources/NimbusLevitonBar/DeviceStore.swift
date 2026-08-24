@@ -171,6 +171,10 @@ final class DeviceStore {
             defer { refreshTask = nil }
             do {
                 let rs = try await client.residences(s)
+                // The user's room order, one request for every residence. A nicety, so a
+                // failure here is not a failed refresh: id order stands, as it does in the
+                // My Leviton app when nobody has ever dragged a room.
+                let orders = (try? await client.roomOrders(s)) ?? [:]
                 var out: [Residence] = []
                 var skipped: [String] = []
                 for r in rs {
@@ -178,7 +182,8 @@ final class DeviceStore {
                         async let rooms = client.rooms(s, residenceId: r.id)
                         async let ds = client.devices(s, residenceId: r.id)
                         let sorted = try await ds.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-                        var res = Residence(id: r.id, name: r.name, rooms: try await rooms, devices: sorted)
+                        var res = Residence(id: r.id, name: r.name, rooms: try await rooms, devices: sorted,
+                                            roomOrder: orders[r.id] ?? [])
                         Self.recomputeRooms(&res)
                         out.append(res)
                     } catch LevitonClient.Error.unauthorized {

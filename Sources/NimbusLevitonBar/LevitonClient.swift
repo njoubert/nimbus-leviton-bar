@@ -155,7 +155,8 @@ final class LevitonClient: Sendable {
         try await array("Residences/\(residenceId)/iotSwitches", s).compactMap { Self.device(from: $0, residenceId: residenceId) }
     }
 
-    /// Rooms in the order My Leviton lists them (it has no `position`; the app shows this order).
+    /// Rooms as the API lists them, which is by id. The order the user *sees* is a
+    /// preference on the person — see `roomOrders`.
     func rooms(_ s: Keychain.Session, residenceId: String) async throws -> [Room] {
         try await array("Residences/\(residenceId)/residentialRooms", s).compactMap { r in
             guard let id = Self.idString(r["id"]) else { return nil }
@@ -163,6 +164,37 @@ final class LevitonClient: Sendable {
                         power: ((r["power"] as? String) ?? "").uppercased() == "ON")
         }
     }
+
+    /// The room order the user dragged into place in the My Leviton app, per residence.
+    ///
+    /// It is **not** on the room: `ResidentialRoom.position` is null on every room, a dead
+    /// field like `includeInRoomOnOff`. My Leviton keeps it on the person, as one
+    /// `Preference` row per residence — `key` `sorting$residence:{id}$rooms`, `value` a JSON
+    /// array of room ids — so two people sharing a residence each get their own order. The
+    /// web bundle writes it from `saveRoomSortOrder` and reads it with `sortItemsByKeyOrder`,
+    /// whose lookup misses (rooms added since the last drag) sort last, and which falls back
+    /// to sorting by id when the row is absent — the order `rooms` already returns.
+    ///
+    /// One request covers every residence, so this is fetched once per refresh.
+    func roomOrders(_ s: Keychain.Session) async throws -> [String: [String]] {
+        var out: [String: [String]] = [:]
+        for p in try await array("Person/\(s.userId)/preferences", s) {
+            guard let key = p["key"] as? String,
+                  key.hasPrefix(Self.roomOrderPrefix), key.hasSuffix(Self.roomOrderSuffix),
+                  let value = p["value"] as? String else { continue }
+            let rid = String(key.dropFirst(Self.roomOrderPrefix.count).dropLast(Self.roomOrderSuffix.count))
+            guard !rid.isEmpty, let ids = (try? JSONSerialization.jsonObject(with: Data(value.utf8))) as? [Any] else { continue }
+            // The app writes these under DECORA_SMART; if some other client ever wrote the
+            // same key, the one the app itself reads wins.
+            if out[rid] == nil || (p["appId"] as? String) == "DECORA_SMART" {
+                out[rid] = ids.compactMap(Self.idString)
+            }
+        }
+        return out
+    }
+
+    private static let roomOrderPrefix = "sorting$residence:"
+    private static let roomOrderSuffix = "$rooms"
 
     func device(_ s: Keychain.Session, id: String) async throws -> Device {
         let j = try await object("IotSwitches/\(id)", s)

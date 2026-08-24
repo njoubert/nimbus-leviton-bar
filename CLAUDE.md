@@ -187,8 +187,9 @@ update) apply.
   preset 0): the same combined write held at 75 for 30 s. **An echo is not proof** — the reply
   to a combined write reports the n the device is about to throw away. Only a GET a couple of
   seconds later, or the device's own (client-id-less) realtime message, tells you the truth.
-- **Rooms:** `Residences/{id}/residentialRooms` → `{id, name, power, allConnected}`, in the
-  app's order (`position` is null on every room). Devices carry `residentialRoomId` and
+- **Rooms:** `Residences/{id}/residentialRooms` → `{id, name, power, allConnected}`, **in id
+  order** — not the app's order, and `position` is null on every room (dead, like
+  `includeInRoomOnOff`). Devices carry `residentialRoomId` and
   `includeInRoomOnOff`. Room switching is `POST /api/ResidentialRooms/turnOn?id=N` (or
   `turnOff`), what the web app calls — **the server moves every device in the room and ignores
   `includeInRoomOnOff`.** Measured 2026-08-22 with `--room Alcove on`: all three Alcove
@@ -204,6 +205,27 @@ update) apply.
   devices.
   Timestamps are no help in forensics here: every device's `lastUpdated` bumps on a periodic
   cloud sync (all of them at once), and a redundant PUT bumps it too.
+- **The room order the user dragged into place lives on the *person*, not the room.**
+  `Person/{userId}/preferences` (a LoopBack `Preference`: `{appId, key, value}`) carries one
+  row per residence — `appId` `DECORA_SMART`, `key` `sorting$residence:{residenceId}$rooms`,
+  `value` a JSON *string* holding an array of room ids. Per person, so two people sharing a
+  residence each keep their own order. `LevitonClient.roomOrders` reads the lot in one request
+  and `Residence.displayRooms` applies it; `--print` shows the result and says so when no row
+  exists. Verified 2026-08-24 against this account: the row read
+  `[1613723,471125,1612878,186780,1489458,186779,211988,355666]` and the owner confirmed the
+  menu now matches the app row for row.
+  - The web bundle is where the scheme is spelled out (`SortOrderPreferencesService`, config
+    `baseKeyPrefix: "sorting$"`, `roomKey: "$rooms"`): `saveRoomSortOrder` writes the id array,
+    `sortItemsByKeyOrder` reads it as `{id: index}` and lodash-`sortBy`s on it — so **ids the
+    row doesn't mention sort last**, stably, and an absent row falls back to `sortBy(id)`,
+    which is the order the API already returns. `displayRooms` does the same, which is why the
+    menu was accidentally right for an account that had never reordered.
+  - The same prefix covers lists we do not read: `$room:{id}$iotSwitches$` (devices within a
+    room), `$unassignedRoomIotSwitches`, `$activitySortOrder`, `$scenes$`. This account has
+    exactly one `sorting$` row, so there is nothing to test the device case against — our own
+    device order stays alphabetical.
+  - Only the *whole* preference list can be fetched: `--get` percent-encodes the path, so
+    `?filter=…` comes back `404 … has no method handling GET …%3Ffilter=…`. It is 24 rows.
 - **Realtime, and how much "live" is worth:** `wss://my.leviton.com/socket/websocket` with `Origin: https://my.leviton.com`.
   Send `{"token": {id, userId, ttl, created, rememberMe}}` on open *and again on the
   `challenge` frame* (the nonce is ignored by every client); wait for

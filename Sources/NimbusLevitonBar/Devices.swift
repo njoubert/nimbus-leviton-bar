@@ -57,17 +57,29 @@ struct Room: Identifiable, Equatable {
 struct Residence: Identifiable, Equatable {
     let id: String
     var name: String
-    /// In the order My Leviton returns them (the app's own order).
+    /// In the order the API returns them, which is by id.
     var rooms: [Room]
     var devices: [Device]
+    /// Room ids in the order the user dragged them into in the My Leviton app, from
+    /// `LevitonClient.roomOrders`. Empty when they never have — then id order stands, which
+    /// is what My Leviton itself falls back to.
+    var roomOrder: [String] = []
 
     func devices(in room: Room) -> [Device] { devices.filter { $0.roomId == room.id } }
 
-    /// The menu's order: rooms as My Leviton lists them, minus the ones with no device, and
-    /// with rooms whose every device is unreachable moved to the end (stable).
+    /// The menu's order: the user's own room order (`roomOrder`), minus the rooms with no
+    /// device, and with rooms whose every device is unreachable moved to the end (stable).
+    /// A room the order doesn't mention — added since the last drag — sorts after the ones it
+    /// does, in id order, which is what the My Leviton app does with it.
     var displayRooms: [Room] {
         let live = rooms.filter { !devices(in: $0).isEmpty }
-        return live.filter { devices(in: $0).contains(where: \.connected) } + live.filter { !devices(in: $0).contains(where: \.connected) }
+        var rank: [String: Int] = [:]
+        for (i, id) in roomOrder.enumerated() where rank[id] == nil { rank[id] = i }
+        let ordered = live.enumerated().sorted { a, b in
+            let ra = rank[a.element.id] ?? Int.max, rb = rank[b.element.id] ?? Int.max
+            return ra == rb ? a.offset < b.offset : ra < rb          // ties keep the API's id order
+        }.map(\.element)
+        return ordered.filter { devices(in: $0).contains(where: \.connected) } + ordered.filter { !devices(in: $0).contains(where: \.connected) }
     }
 
     /// The menu's order within a room: reachable devices first, unreachable ones last (each
