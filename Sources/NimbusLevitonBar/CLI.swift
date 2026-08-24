@@ -199,7 +199,7 @@ enum CLI {
                       let version = SemanticVersion(short) else {
                     fputs("\(path) has no readable CFBundleShortVersionString\n", stderr); return 1
                 }
-                let report = try block {
+                let report = block {
                     await Preflight.run(app: URL(fileURLWithPath: path),
                                         config: Updates.config(currentVersion: version),
                                         releaseVersion: version)
