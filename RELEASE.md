@@ -1,12 +1,12 @@
 # Releasing
 
-`./build.sh release [RELEASE_NOTES_FILE]` does the whole dance — tag, build both artifacts,
-notarize, preflight, push, publish — and it cannot forget the zip, which is the one omission
-that matters. What it does *not* do is bump the version or give you a chance to look at the
+`./build.sh release` does the whole dance: tag, build both artifacts,
+notarize, preflight, push, publish, and confirms the zip release exists. What it does *not* do is bump the version or give you a chance to look at the
 disk image, so those come first.
 
 ## Before you start
 
+- **Write the release notes.** `./build.shrelease` looks for `docs/releases/v$VERSION.txt` by default. Alternatively you can supply a different file by calling `./build.sh release path/to/notes.txt`.
 - **`.signing` must exist** (git-ignored) with `SIGN_IDENTITY` and `NOTARY_PROFILE`. Without a
   Developer ID the build is ad-hoc signed and not notarized, and a copy that arrives with a
   quarantine flag is refused at first open.
