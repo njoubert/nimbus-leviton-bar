@@ -17,8 +17,8 @@ import Foundation
 ///     MYLEVITON_PASSWORD=hunter2
 ///
 /// `MYLEVITON_EMAIL` / `MYLEVITON_PASSWORD` in the environment win over the file, and on their
-/// own are enough (the session is then cached in the working directory). `MYLEVITON_ENV` names
-/// a file somewhere other than `./.leviton`.
+/// own are enough (the session is then cached in the working directory).
+/// `MYLEVITON_ENV_FILE` names a file somewhere other than `./.leviton`.
 enum DevCredentials {
     static let fileName = ".leviton"
     static let sessionFileName = ".leviton-session.json"
@@ -50,7 +50,7 @@ enum DevCredentials {
     /// The credentials the CLI should use instead of the Keychain, if any.
     static func load(warnings: (String) -> Void = { fputs("warning: \($0)\n", stderr) }) -> Store? {
         let env = ProcessInfo.processInfo.environment
-        let path = env["MYLEVITON_ENV"].map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+        let path = env["MYLEVITON_ENV_FILE"].map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
             ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(fileName)
 
         var values: [String: String] = [:]
@@ -62,8 +62,8 @@ enum DevCredentials {
                mode.intValue & 0o077 != 0 {
                 warnings("\(path.path) is readable by others — chmod 600 it")
             }
-        } else if let named = env["MYLEVITON_ENV"] {
-            warnings("MYLEVITON_ENV points at \(named), which cannot be read — falling back to the Keychain")
+        } else if let named = env["MYLEVITON_ENV_FILE"] {
+            warnings("MYLEVITON_ENV_FILE points at \(named), which cannot be read — falling back to the Keychain")
         }
 
         // The environment wins over the file, and suffices on its own.

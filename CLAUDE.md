@@ -102,7 +102,7 @@ an ssh session or a cron job gets `errSecInteractionNotAllowed` ("User interacti
 allowed") from `SecItemCopyMatching` instead of the access panel, so every command reported
 `not signed in` with both items sitting right there — and `codesign` fails the same way
 (`errSecInternalComponent`), leaving `./build.sh build` binaries on their previous signature.
-So the CLI, and only the CLI, takes the login from a git-ignored `.leviton` in the working
+So the CLI, and only the CLI, takes the login from a git-ignored `.leviton` file in the working
 directory when one exists (`DevCredentials.swift`):
 
 ```
@@ -111,7 +111,7 @@ MYLEVITON_PASSWORD=…                # chmod 600 — it warns if the file is re
 ```
 
 `MYLEVITON_EMAIL`/`MYLEVITON_PASSWORD` in the environment win over the file and suffice on
-their own; `MYLEVITON_ENV` names a file elsewhere. The session token is cached in
+their own; `MYLEVITON_ENV_FILE` names a file elsewhere. The session token is cached in
 `.leviton-session.json` (0600, git-ignored) beside it — **this must never become a login per
 command**, which is what locks an account. `--login` and `--logout` write and clear that cache
 instead of the Keychain items, and leave `.leviton` itself alone. `Keychain.readFailureHint`
