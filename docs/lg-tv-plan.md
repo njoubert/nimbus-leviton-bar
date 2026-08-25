@@ -23,6 +23,7 @@ Rendered versions of this document, with diagrams:
 | App identity | **No rename.** Bundle id, Keychain service, Login Item registration, the updater feed and the DMG all key off `com.njoubert.nimbuslevitonbar`. Renaming mid-feature risks orphaning the Keychain items and every installed copy's update path. |
 | Module layout | Folders inside the existing target (`Net/`, `Leviton/`, `LG/`), **not** a second SwiftPM package. Extract later if the SSAP client earns it the way `NimbusUpdater` did. |
 | Store layout | **Two stores, never one.** Sign-in and pairing have different lifecycles, states and failure modes; a union type covering both would be larger and worse than two honest ones. |
+| Addressing | **Discover dynamically, key on the UDN**, cache the last address as a hint only. No DHCP reservation required — depending on router configuration for the app to work would be a design fault. Manual entry stays as a last-resort escape hatch. |
 | Default state | **Feature-dark.** No paired TV means no TV section, no discovery, no socket, no behaviour change for anyone who does not opt in. |
 
 ## Facts the design rests on
@@ -65,8 +66,16 @@ native endpoint and to probe capabilities rather than assume them.
   is not proof. Read back to verify.
 - **Picture mode can lock the controls.** Filmmaker Mode and Dolby Vision in particular.
   BetterDisplay's own UI warns about it.
-- **SSDP will not reliably cross this LAN's subnets.** It is multicast and this network spans many
-  `10.10.x` ranges. A manual address entry is a first-class path, not an escape hatch.
+- **Discovery is dynamic — no DHCP reservation needed.** The LAN is a single flat `10.0.0.0/8`, so
+  multicast works: a targeted `M-SEARCH` with `ST: urn:lge:device:tv:1` returns exactly this TV
+  (verified 2026-08-25, twice). **Persist the UDN, not the IP** —
+  `uuid:74ee9ab1-f680-46b7-98b6-6f3f8f0c8b45` is the stable identity across DHCP changes; the
+  address is only a cache hint. Note the DIAL service on the same TV advertises a *different* UUID,
+  so match on the `urn:lge:device:tv:1` responder specifically.
+- **SSDP only answers while the TV is awake**, which is also the only time it is controllable — so
+  that is coherent rather than a gap. Waking a TV that is off is Wake-on-LAN with the stored MAC
+  (an L2 broadcast, needing no IP at all), and it must first be enabled under
+  Settings → Support → IP control settings.
 - **Pair once, persist the key.** Never a pair per command — it puts a prompt on the television
   every time. Same discipline as `.leviton-session.json`.
 
@@ -126,7 +135,7 @@ Sources/NimbusLevitonBar/
     Devices.swift  DevCredentials.swift
   LG/
     SSAPSession.swift         NEW ~220  pair, request/response, subscribe
-    SSAPDiscovery.swift       NEW ~90   SSDP M-SEARCH + manual IP
+    SSAPDiscovery.swift       NEW ~90   M-SEARCH, UDN match, cached-address fast path
     TVStore.swift             NEW ~200  state, optimistic writes, capability probe
     TV.swift                  NEW ~60   the value type + picture settings
     TVPairingDialog.swift     NEW ~80   onboarding UI
@@ -146,12 +155,19 @@ need to share something it goes in `Net/`, or it does not get shared. The two me
 Pairing is not signing in and the UI should not pretend otherwise. There is no password: the TV
 shows a prompt and someone picks up the remote.
 
-1. **Discover** — SSDP `M-SEARCH` for `urn:lge:device:tv:1`, with manual address entry alongside it.
+1. **Discover** — targeted SSDP `M-SEARCH` with `ST: urn:lge:device:tv:1`, matching the responder's
+   UDN against the stored one. On reconnect, try the cached address first with a short timeout and
+   only fall back to multicast when it fails; that keeps the common case off the network entirely.
+   `MX: 2` means responders randomise their reply within two seconds, so return on first match
+   rather than waiting the full window.
 2. **Connect** — `wss://<tv>:3001`, pinning the self-signed certificate on first pair (TOFU).
 3. **Register** — send `{"type":"register", manifest: …}` with the permissions wanted.
 4. **The TV prompts**; the user accepts with the remote.
 5. **Store** — `{"type":"registered","client-key":…}` goes to the Keychain, never UserDefaults,
    never a log. Later launches send the stored key and get `registered` straight back, no prompt.
+   Alongside it record the **UDN** (identity), the **MAC** from the device description
+   (`wiredMac`/`wifiMac`, for Wake-on-LAN) and the **last-known address** (a hint). Only the
+   client-key is a secret; the rest can live in UserDefaults.
 6. **Probe capabilities once** — read the picture settings back to learn which keys this firmware
    honours, and cache the answer. This is what lets the app degrade honestly later.
 
@@ -165,7 +181,7 @@ slider that moves and does nothing is the worst outcome available.
 | webOS 26 moves the ground | High | Prefer the native endpoint; capability-probe once per pairing and store what worked; on probe failure hide the TV section entirely rather than showing a dead control, and put the reason in the status row. |
 | The native endpoint is unverified | High | Phase 0 exists solely to answer this from the CLI before any UI work. A genuine go/no-go gate. |
 | Self-signed TLS means disabling verification | Medium | Scope the exception to the paired host and pin the cert on first pair. Use a **separate `URLSession`** for the TV so the delegate that accepts it can never see my.leviton.com or GitHub. Say so in README. |
-| The TV is off most of the time | Medium | Model "off" as a distinct expected state with quiet presentation, **not** `.error`. Reconnect on wake via the existing `NSWorkspace` observer. Back off hard when simply absent. |
+| The TV is off most of the time | Medium | Model "off" as a distinct expected state with quiet presentation, **not** `.error`. Reconnect on wake via the existing `NSWorkspace` observer. Back off hard when simply absent. A TV in standby does not answer SSDP either, so treat "not discovered" and "not reachable" as one quiet state. |
 | The extraction regresses working code | Medium | Extract with no behaviour change and prove it the way the bugs were originally found: `pongTimeout` to 0.0001, `pingInterval` to 5, run `--watch`, confirm one drop still schedules exactly one reconnect. Do it before any LG code exists so a regression has one possible cause. |
 | Product identity drifts | Medium | Do not rename (see decisions). Update README's service list from two to three, honestly. Treat renaming as its own migration, later or never. |
 
