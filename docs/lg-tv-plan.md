@@ -1,7 +1,7 @@
 # LG webOS TV brightness: findings and implementation plan
 
-Making the LG OLED G5 follow the room lights — dim the Leviton dimmers and the TV dims with them,
-over the LAN, from the same menu bar. Investigated 2026-08-25 against leviton-bar 1.6.0 (commit
+Putting the LG OLED G5's brightness on the same menu as the Leviton dimmers, over the LAN, so the
+lighting in a room is controlled from one surface. Investigated 2026-08-25 against leviton-bar 1.6.0 (commit
 `014d218`) and an `OLED65G5WUA` on webOS 25; every probe result below was taken on that day
 against that TV. Read the whole plan before starting — Phase 0 is a go/no-go gate and the
 rest is void if it fails.
@@ -13,23 +13,37 @@ Rendered versions of this document, with diagrams:
 
 ## What this is for
 
-Not a second vendor bolted onto a lights app. The product is a **follower**: dim the lights in the
-room and the TV dims with them, so nobody reaches for the TV remote after every scene change. The
-lights are the input, the TV is the output, and the feature is the link between them — not a second
-slider.
+**One surface for the lighting in a room.** The Leviton dimmers set the room's light; the TV's OLED
+panel is the other large light source in it. Today, changing one means the menu bar and changing the
+other means hunting for a remote. Putting both on the same menu *is* the feature.
 
-That framing settles several things that would otherwise be open:
+That also fixes the scope: **brightness only.** No volume, no input switching, no power, no
+transport controls — those are television features and this is not a television app. If a control
+does not change the light in the room, it does not belong here.
 
-- **The primary UI is a link, not a TV control.** "Match TV to <room>" is the feature. A manual TV
-  slider is a secondary convenience, worth having but not the point.
-- **Round-trip latency stops mattering.** Nobody drags a TV slider waiting for it to catch up; the
-  write happens in the background after a light change. "Control may be slow" is a real caveat
-  against driving a TV by hand and barely applies to this shape.
-- **The missing macOS keyboard integration stops mattering.** F1/F2 driving TV brightness was never
-  the point — this is not a display-brightness feature, and the TV being this Mac's display is
-  incidental to it.
-- **The app stays the lights app.** It does not become a two-vendor platform, which reinforces the
-  no-rename decision for a better reason than migration risk.
+Two systems, deliberately independent:
+
+- **No following logic, and none in this plan.** The TV does not track the lights. The two stores
+  do not know each other exists.
+- **The strict boundary is what keeps that option open.** Making the TV follow the room is a
+  plausible *later* enhancement and explicitly not committed. The cheapest way to keep it cheap is
+  to not anticipate it: two clean stores with no knowledge of each other can be joined later by one
+  small mediator, whereas a coupling baked in early cannot be taken out.
+- **Latency is a non-issue at this shape.** A manual slider that commits on release and takes a
+  round trip is exactly what the Leviton rows already do, and that has been fine in practice.
+- **The macOS keyboard gap is a non-issue too.** F1/F2 driving TV brightness was never the point —
+  that the TV happens to be this Mac's display is incidental to controlling a room's light.
+
+### Deliberately out of scope
+
+Recording these so they do not get re-litigated, and so nobody mistakes an omission for an oversight.
+
+| Not doing | Why |
+|---|---|
+| TV brightness following the lights | A possible future enhancement, not committed. The independent-stores design is what keeps it cheap to add. |
+| Volume, input, power, playback | Television features. This app is about the light in a room. |
+| More than one TV | One set is the use case. The design does not preclude more, but nothing is built for it. |
+| Calibration, picture modes, white balance | That is what bscpylgtv and ColourSpace are for, and webOS 26 is removing the endpoints anyway. |
 
 ## Decisions (settled — do not reopen)
 
@@ -44,8 +58,8 @@ That framing settles several things that would otherwise be open:
 | Module layout | Folders inside the existing target (`Net/`, `Leviton/`, `LG/`), **not** a second SwiftPM package. Extract later if the SSAP client earns it the way `NimbusUpdater` did. |
 | Store layout | **Two stores, never one.** Sign-in and pairing have different lifecycles, states and failure modes; a union type covering both would be larger and worse than two honest ones. |
 | Addressing | **Discover dynamically, key on the UDN**, cache the last address as a hint only. No DHCP reservation required — depending on router configuration for the app to work would be a design fault. Manual entry stays as a last-resort escape hatch. |
-| Product shape | **A follower, not a second integration.** The TV tracks a Leviton room's level; a manual TV slider is secondary. |
-| Coupling | One mediator, `Link/BrightnessLink.swift`, is the **only** file allowed to name both vendors. Neither store learns the other exists. |
+| Product shape | **Two independent controls on one surface.** Brightness only; no following logic, no other TV controls. |
+| Coupling | **None.** No file may name both vendors. A follower, if it ever happens, arrives later as a single mediator — not now. |
 | Default state | **Feature-dark.** No paired TV means no TV section, no discovery, no socket, no behaviour change for anyone who does not opt in. |
 
 ## Facts the design rests on
@@ -94,6 +108,14 @@ native endpoint and to probe capabilities rather than assume them.
   `uuid:74ee9ab1-f680-46b7-98b6-6f3f8f0c8b45` is the stable identity across DHCP changes; the
   address is only a cache hint. Note the DIAL service on the same TV advertises a *different* UUID,
   so match on the `urn:lge:device:tv:1` responder specifically.
+- **Discovery is cheap enough to do unconditionally, so do not cache the address.** Measured on this
+  LAN 2026-08-25: `MX: 1` returns the first (and only) match in **112–311 ms**; `MX: 2` takes
+  311–1302 ms, because responders randomise their reply across the window. The request is one 105-byte
+  datagram out and one back. Connecting to a already-known address instead costs 2–17 ms for TCP and
+  39–174 ms for the TLS handshake — so caching saves roughly 200 ms and buys two problems: a
+  stale-cache path to test, and the case where DHCP has handed that address to something else and the
+  app offers its client-key to a stranger. Discovering first means the UDN is verified *before* any
+  credential is sent. One code path, always correct, ~200 ms.
 - **SSDP only answers while the TV is awake**, which is also the only time it is controllable — so
   that is coherent rather than a gap. Waking a TV that is off is Wake-on-LAN with the stored MAC
   (an L2 broadcast, needing no IP at all), and it must first be enabled under
@@ -113,10 +135,9 @@ native endpoint and to probe capabilities rather than assume them.
 Software dimming is orthogonal and can be layered on either: hardware `backlight` for coarse steps
 (the ones that actually save power and panel life), gamma for instant fine adjustment.
 
-**For the follower, though, software dimming is largely useless** — it dims only *this Mac's
-output*, so a TV showing its own apps or another input would not follow the room lights at all.
-Hardware `backlight` is the only option that works regardless of what the TV is showing. That is a
-point in favour of building this rather than settling for gamma.
+**But it is not a substitute here** — it dims only *this Mac's output*, so a TV showing its own apps
+or another input would still be flooding the room with light. If the goal is the light in the room,
+hardware `backlight` is the only thing that works regardless of what is on screen.
 
 ## Architecture
 
@@ -165,39 +186,65 @@ Sources/NimbusLevitonBar/
     TVStore.swift             NEW ~200  state, optimistic writes, capability probe
     TV.swift                  NEW ~60   the value type + picture settings
     TVPairingDialog.swift     NEW ~80   onboarding UI
-  Link/
-    BrightnessLink.swift      NEW ~120  the follower: room level → TV backlight, debounced
 ```
 
-Roughly +950 lines: 3,514 → ~4,470. One file refactored, none rewritten, no new dependencies.
+Roughly +830 lines: 3,514 → ~4,350. One file refactored, none rewritten, no new dependencies.
 
 ### The boundary
 
-**No cross-imports between vendors.** Nothing in `Leviton/` may name a type from `LG/` or the
-reverse. If they need shared plumbing it goes in `Net/`, or it does not get shared.
+**No cross-imports. None.** Nothing in `Leviton/` may name a type from `LG/` or the reverse, and no
+third file may name both. If they need shared plumbing it goes in `Net/`, or it does not get shared.
 
-The follower needs *something* that knows both, so confine that rather than forbid it.
-`Link/BrightnessLink.swift` is the single file in the app permitted to import both: it observes
-`DeviceStore` and writes through `TVStore`, and neither store learns the other exists.
+This is the rule that would have to be relaxed to make the TV follow the lights, and relaxing it
+later is a deliberate, reviewable act: one new file that imports both, and nothing else changes.
+Anticipating it now would mean threading a coupling through code that does not need one.
 
-```
-Leviton room level ──▶ BrightnessLink ──▶ TVStore.setBacklight
-                       (mapping + debounce)
-```
-
-Otherwise the two vendors meet only in `StatusBarController.rebuild()` — already the single place
-the menu is assembled — and in `Keychain`, and both meet them as strangers.
+The two vendors meet only in `StatusBarController.rebuild()` — already the single place the menu is
+assembled — and in `Keychain`, and both meet them as strangers.
 
 ## Onboarding
 
 Pairing is not signing in and the UI should not pretend otherwise. There is no password: the TV
 shows a prompt and someone picks up the remote.
 
-1. **Discover** — targeted SSDP `M-SEARCH` with `ST: urn:lge:device:tv:1`, matching the responder's
-   UDN against the stored one. On reconnect, try the cached address first with a short timeout and
-   only fall back to multicast when it fails; that keeps the common case off the network entirely.
-   `MX: 2` means responders randomise their reply within two seconds, so return on first match
-   rather than waiting the full window.
+### How the discovery actually works (no scanning involved)
+
+Nothing sweeps the address space — a `10.0.0.0/8` holds 16.7 million addresses and probing them
+would take hours and look exactly like a port scan. SSDP sends **one** UDP datagram, 105 bytes, to
+the multicast group `239.255.255.250:1900`:
+
+```
+M-SEARCH * HTTP/1.1
+HOST: 239.255.255.250:1900
+MAN: "ssdp:discover"
+MX: 1
+ST: urn:lge:device:tv:1
+```
+
+`239.255.255.250` is not a host, it is a group address that SSDP-speaking devices have joined (via
+IGMP) and are listening on. The network delivers the datagram to the group's members — flooded
+across the broadcast domain, or on a switch doing IGMP snooping, only to ports that actually joined.
+Everything whose device type matches the `ST:` header answers with a single **unicast** datagram
+straight back to our source port; everything else stays silent. It is HTTP syntax over UDP, with no
+connection and no handshake.
+
+So the whole transaction is one datagram out and one back, which is what the measurement showed.
+
+`MX: 1` is the response-spreading window: it tells responders to randomise their reply somewhere in
+the next second, so a network with a hundred UPnP devices does not answer in one thundering
+simultaneous burst. Because we filter to `urn:lge:device:tv:1` there is exactly one responder here,
+so that spread buys us nothing and only adds latency — which is precisely why `MX: 1` measured
+faster than `MX: 2`. It is also why the group address matters for scope: `239.0.0.0/8` is
+administratively scoped and routers do not forward it off the local network without explicit
+multicast routing, so this reaches the LAN and stops there.
+
+This is the same mechanism behind Bonjour/mDNS (`224.0.0.251:5353`), and behind how AirPlay,
+Chromecast and Sonos find each other.
+
+1. **Discover, every time** — targeted SSDP `M-SEARCH` with `ST: urn:lge:device:tv:1`, matching the
+   responder's UDN against the stored one, then connect to whatever address it answered from.
+   **Use `MX: 1` and return on the first match**; do not wait out the window. No cached-address fast
+   path — see the cost note below.
 2. **Connect** — `wss://<tv>:3001`, pinning the self-signed certificate on first pair (TOFU).
 3. **Register** — send `{"type":"register", manifest: …}` with the permissions wanted.
 4. **The TV prompts**; the user accepts with the remote.
@@ -212,22 +259,6 @@ shows a prompt and someone picks up the remote.
 Surface the TV-side prerequisites in the pairing dialog: LG Connect Apps on, Energy Saving off. A
 slider that moves and does nothing is the worst outcome available.
 
-## The mapping is a product decision
-
-A room at 40% does not mean a TV at 40%. Dimmer percentage and OLED pixel brightness are different
-perceptual scales, and a TV at 0 is not what anyone wants when the lights go out. Starting policy,
-to be tuned by eye:
-
-- **Clamp to a usable band** — map onto roughly TV 15–100 rather than 0–100, so the TV never goes
-  unwatchably dark and never jumps to full blast.
-- **Linear within the band** to begin with. Add a curve only if it looks wrong in the room.
-- **Lights fully off is the interesting case.** A dark room wants the TV *dimmer*, not off — the
-  bottom of the band, not zero.
-- **Which room?** The one the TV is in. Leviton already models rooms and their display order, so
-  this is a pick-list rather than new modelling.
-
-**Needs a decision before Phase 4.** Nothing before that depends on the answer.
-
 ## Risks and mitigations
 
 | Risk | Severity | Mitigation |
@@ -237,9 +268,7 @@ to be tuned by eye:
 | Self-signed TLS means disabling verification | Medium | Scope the exception to the paired host and pin the cert on first pair. Use a **separate `URLSession`** for the TV so the delegate that accepts it can never see my.leviton.com or GitHub. Say so in README. |
 | The TV is off most of the time | Medium | Model "off" as a distinct expected state with quiet presentation, **not** `.error`. Reconnect on wake via the existing `NSWorkspace` observer. Back off hard when simply absent. A TV in standby does not answer SSDP either, so treat "not discovered" and "not reachable" as one quiet state. |
 | The extraction regresses working code | Medium | Extract with no behaviour change and prove it the way the bugs were originally found: `pongTimeout` to 0.0001, `pingInterval` to 5, run `--watch`, confirm one drop still schedules exactly one reconnect. Do it before any LG code exists so a regression has one possible cause. |
-| The link fights the user | Medium | If someone dims the TV with the remote, the next light change must not stomp it. A manual TV change **suspends the link** until the TV is next powered on, or until the user re-links explicitly. An argument the app always wins is worse than no feature at all. |
-| Write amplification | Medium | A dimmer sweep from a wall switch or the phone app arrives as a stream of realtime pushes, and naively each one would be a TV write. Debounce and coalesce in `BrightnessLink` — settle for ~300 ms, then write once. Leviton's own slider already commits on release only, but no other source does. |
-| Writing to a TV that is off | Low | Pointless at best and wakes the set at worst. Only write when the TV is on; drop the update rather than queueing it. |
+| Writing to a TV that is off | Low | Pointless at best and wakes the set at worst. Disable the row when the TV is not reachable rather than queueing writes for later. |
 | Product identity drifts | Medium | Do not rename (see decisions). Update README's service list from two to three, honestly. Treat renaming as its own migration, later or never. |
 
 ## Managing the complexity
@@ -264,7 +293,7 @@ Five rules keep a second vendor from infecting the first:
 | 1 | **Extract `ReconnectingSocket`.** Pure refactor, no new features, no LG code. Commit separately so it can be reverted alone. | ~1 day | Forced-failure test passes and the app behaves identically. Ship before any LG code. |
 | 2 | **`SSAPSession` + discovery + pairing, CLI only.** Socket, request correlation, cert pinning, register handshake, Keychain item, SSDP with manual fallback. | ~2–3 days | `--tv-set backlight 40` changes the panel and `--tv-watch` shows the TV's own change arriving. |
 | 3 | **`TVStore`.** Main-actor state, optimistic writes with snap-back, capability probe, off/unreachable states, wake handling. | ~1–2 days | Mirrors `DeviceStore`'s patterns without sharing its code. |
-| 4 | **The link and the menu.** `BrightnessLink` with its mapping and debounce, the "Match TV to <room>" control, and a manual TV row reusing `LevelControl`. Structural changes wait for the next open; values update in place. | ~2 days | Dimming the room dims the TV once, at a sensible level, and adjusting the TV by remote stops it fighting back. Verified with `--dump-menu` in both themes. |
+| 4 | **The menu section.** One TV brightness row reusing `LevelControl`, and nothing else. Structural changes wait for the next open; values update in place. | ~1 day | The row moves the panel, and is disabled rather than misleading when the TV is unreachable. Verified with `--dump-menu` in both themes. |
 | 5 | **Docs, prek, release.** README two services → three. CLAUDE.md gains an LG section with the traps above. | ~half a day | `prek run --all-files`, then `./build.sh release`. |
 
 Phases 0 and 1 are independently valuable: 0 answers a question worth answering regardless, and 1
