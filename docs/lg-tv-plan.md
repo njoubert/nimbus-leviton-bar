@@ -1,7 +1,7 @@
 # LG webOS TV brightness: findings and implementation plan
 
-Adding brightness control for the LG OLED G5 that this Mac uses as its display, over the LAN,
-to the same menu bar. Investigated 2026-08-25 against leviton-bar 1.6.0 (commit
+Making the LG OLED G5 follow the room lights — dim the Leviton dimmers and the TV dims with them,
+over the LAN, from the same menu bar. Investigated 2026-08-25 against leviton-bar 1.6.0 (commit
 `014d218`) and an `OLED65G5WUA` on webOS 25; every probe result below was taken on that day
 against that TV. Read the whole plan before starting — Phase 0 is a go/no-go gate and the
 rest is void if it fails.
@@ -10,6 +10,26 @@ Rendered versions of this document, with diagrams:
 
 - Findings — <https://claude.ai/code/artifact/53559878-dc3e-481e-b553-4a45e0180b0f>
 - Plan — <https://claude.ai/code/artifact/454298bd-7cab-4df3-bd93-ab8093510067>
+
+## What this is for
+
+Not a second vendor bolted onto a lights app. The product is a **follower**: dim the lights in the
+room and the TV dims with them, so nobody reaches for the TV remote after every scene change. The
+lights are the input, the TV is the output, and the feature is the link between them — not a second
+slider.
+
+That framing settles several things that would otherwise be open:
+
+- **The primary UI is a link, not a TV control.** "Match TV to <room>" is the feature. A manual TV
+  slider is a secondary convenience, worth having but not the point.
+- **Round-trip latency stops mattering.** Nobody drags a TV slider waiting for it to catch up; the
+  write happens in the background after a light change. "Control may be slow" is a real caveat
+  against driving a TV by hand and barely applies to this shape.
+- **The missing macOS keyboard integration stops mattering.** F1/F2 driving TV brightness was never
+  the point — this is not a display-brightness feature, and the TV being this Mac's display is
+  incidental to it.
+- **The app stays the lights app.** It does not become a two-vendor platform, which reinforces the
+  no-rename decision for a better reason than migration risk.
 
 ## Decisions (settled — do not reopen)
 
@@ -24,6 +44,8 @@ Rendered versions of this document, with diagrams:
 | Module layout | Folders inside the existing target (`Net/`, `Leviton/`, `LG/`), **not** a second SwiftPM package. Extract later if the SSAP client earns it the way `NimbusUpdater` did. |
 | Store layout | **Two stores, never one.** Sign-in and pairing have different lifecycles, states and failure modes; a union type covering both would be larger and worse than two honest ones. |
 | Addressing | **Discover dynamically, key on the UDN**, cache the last address as a hint only. No DHCP reservation required — depending on router configuration for the app to work would be a design fault. Manual entry stays as a last-resort escape hatch. |
+| Product shape | **A follower, not a second integration.** The TV tracks a Leviton room's level; a manual TV slider is secondary. |
+| Coupling | One mediator, `Link/BrightnessLink.swift`, is the **only** file allowed to name both vendors. Neither store learns the other exists. |
 | Default state | **Feature-dark.** No paired TV means no TV section, no discovery, no socket, no behaviour change for anyone who does not opt in. |
 
 ## Facts the design rests on
@@ -89,8 +111,12 @@ native endpoint and to probe capabilities rather than assume them.
 | DDC/CI + HDMI-CEC | Not possible | — | — | **Dead end** |
 
 Software dimming is orthogonal and can be layered on either: hardware `backlight` for coarse steps
-(the ones that actually save power and panel life), gamma for instant fine adjustment, so a slider
-feels responsive despite the round trip.
+(the ones that actually save power and panel life), gamma for instant fine adjustment.
+
+**For the follower, though, software dimming is largely useless** — it dims only *this Mac's
+output*, so a TV showing its own apps or another input would not follow the room lights at all.
+Hardware `backlight` is the only option that works regardless of what the TV is showing. That is a
+point in favour of building this rather than settling for gamma.
 
 ## Architecture
 
@@ -139,16 +165,28 @@ Sources/NimbusLevitonBar/
     TVStore.swift             NEW ~200  state, optimistic writes, capability probe
     TV.swift                  NEW ~60   the value type + picture settings
     TVPairingDialog.swift     NEW ~80   onboarding UI
+  Link/
+    BrightnessLink.swift      NEW ~120  the follower: room level → TV backlight, debounced
 ```
 
-Roughly +830 lines: 3,514 → ~4,350. One file refactored, none rewritten, no new dependencies.
+Roughly +950 lines: 3,514 → ~4,470. One file refactored, none rewritten, no new dependencies.
 
 ### The boundary
 
-**No cross-imports.** Nothing in `Leviton/` may name a type from `LG/` or the reverse. If they ever
-need to share something it goes in `Net/`, or it does not get shared. The two meet only in
-`StatusBarController.rebuild()` — already the single place the menu is assembled — and in
-`Keychain`, and both meet them as strangers.
+**No cross-imports between vendors.** Nothing in `Leviton/` may name a type from `LG/` or the
+reverse. If they need shared plumbing it goes in `Net/`, or it does not get shared.
+
+The follower needs *something* that knows both, so confine that rather than forbid it.
+`Link/BrightnessLink.swift` is the single file in the app permitted to import both: it observes
+`DeviceStore` and writes through `TVStore`, and neither store learns the other exists.
+
+```
+Leviton room level ──▶ BrightnessLink ──▶ TVStore.setBacklight
+                       (mapping + debounce)
+```
+
+Otherwise the two vendors meet only in `StatusBarController.rebuild()` — already the single place
+the menu is assembled — and in `Keychain`, and both meet them as strangers.
 
 ## Onboarding
 
@@ -174,6 +212,22 @@ shows a prompt and someone picks up the remote.
 Surface the TV-side prerequisites in the pairing dialog: LG Connect Apps on, Energy Saving off. A
 slider that moves and does nothing is the worst outcome available.
 
+## The mapping is a product decision
+
+A room at 40% does not mean a TV at 40%. Dimmer percentage and OLED pixel brightness are different
+perceptual scales, and a TV at 0 is not what anyone wants when the lights go out. Starting policy,
+to be tuned by eye:
+
+- **Clamp to a usable band** — map onto roughly TV 15–100 rather than 0–100, so the TV never goes
+  unwatchably dark and never jumps to full blast.
+- **Linear within the band** to begin with. Add a curve only if it looks wrong in the room.
+- **Lights fully off is the interesting case.** A dark room wants the TV *dimmer*, not off — the
+  bottom of the band, not zero.
+- **Which room?** The one the TV is in. Leviton already models rooms and their display order, so
+  this is a pick-list rather than new modelling.
+
+**Needs a decision before Phase 4.** Nothing before that depends on the answer.
+
 ## Risks and mitigations
 
 | Risk | Severity | Mitigation |
@@ -183,6 +237,9 @@ slider that moves and does nothing is the worst outcome available.
 | Self-signed TLS means disabling verification | Medium | Scope the exception to the paired host and pin the cert on first pair. Use a **separate `URLSession`** for the TV so the delegate that accepts it can never see my.leviton.com or GitHub. Say so in README. |
 | The TV is off most of the time | Medium | Model "off" as a distinct expected state with quiet presentation, **not** `.error`. Reconnect on wake via the existing `NSWorkspace` observer. Back off hard when simply absent. A TV in standby does not answer SSDP either, so treat "not discovered" and "not reachable" as one quiet state. |
 | The extraction regresses working code | Medium | Extract with no behaviour change and prove it the way the bugs were originally found: `pongTimeout` to 0.0001, `pingInterval` to 5, run `--watch`, confirm one drop still schedules exactly one reconnect. Do it before any LG code exists so a regression has one possible cause. |
+| The link fights the user | Medium | If someone dims the TV with the remote, the next light change must not stomp it. A manual TV change **suspends the link** until the TV is next powered on, or until the user re-links explicitly. An argument the app always wins is worse than no feature at all. |
+| Write amplification | Medium | A dimmer sweep from a wall switch or the phone app arrives as a stream of realtime pushes, and naively each one would be a TV write. Debounce and coalesce in `BrightnessLink` — settle for ~300 ms, then write once. Leviton's own slider already commits on release only, but no other source does. |
+| Writing to a TV that is off | Low | Pointless at best and wakes the set at worst. Only write when the TV is on; drop the update rather than queueing it. |
 | Product identity drifts | Medium | Do not rename (see decisions). Update README's service list from two to three, honestly. Treat renaming as its own migration, later or never. |
 
 ## Managing the complexity
@@ -207,7 +264,7 @@ Five rules keep a second vendor from infecting the first:
 | 1 | **Extract `ReconnectingSocket`.** Pure refactor, no new features, no LG code. Commit separately so it can be reverted alone. | ~1 day | Forced-failure test passes and the app behaves identically. Ship before any LG code. |
 | 2 | **`SSAPSession` + discovery + pairing, CLI only.** Socket, request correlation, cert pinning, register handshake, Keychain item, SSDP with manual fallback. | ~2–3 days | `--tv-set backlight 40` changes the panel and `--tv-watch` shows the TV's own change arriving. |
 | 3 | **`TVStore`.** Main-actor state, optimistic writes with snap-back, capability probe, off/unreachable states, wake handling. | ~1–2 days | Mirrors `DeviceStore`'s patterns without sharing its code. |
-| 4 | **The menu section.** One row group reusing `LevelControl`. Structural changes wait for the next open; values update in place. | ~1 day | Verified with `--dump-menu` in both themes. |
+| 4 | **The link and the menu.** `BrightnessLink` with its mapping and debounce, the "Match TV to <room>" control, and a manual TV row reusing `LevelControl`. Structural changes wait for the next open; values update in place. | ~2 days | Dimming the room dims the TV once, at a sensible level, and adjusting the TV by remote stops it fighting back. Verified with `--dump-menu` in both themes. |
 | 5 | **Docs, prek, release.** README two services → three. CLAUDE.md gains an LG section with the traps above. | ~half a day | `prek run --all-files`, then `./build.sh release`. |
 
 Phases 0 and 1 are independently valuable: 0 answers a question worth answering regardless, and 1
