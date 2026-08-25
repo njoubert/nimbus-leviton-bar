@@ -64,6 +64,8 @@ Sources/NimbusLevitonBar/
   DevCredentials.swift    the CLI-only .leviton login file and its cached session token
   SignInDialog.swift      NSAlert with email/password fields; the 2FA code prompt
   StatusBarController.swift  the status item (lightbulb + count), the menu
+  Diagnostics.swift       the flight recorder: REST, websocket frames, app milestones, redacted
+  InternalsPanel.swift    the ⌥ Internals window over that buffer, and --dump-internals
   MenuRows.swift          the view-based rows (device / room / text), the shared LevelControl
                           slider, the hover highlight, and the --dump-menu preview
   LoginItem.swift         SMAppService wrapper (identical to net-bar's)
@@ -99,6 +101,7 @@ queue, which `DeviceStore` enters with `MainActor.assumeIsolated`. `LevitonClien
 .build/debug/NimbusLevitonBar --get PATH      raw GET, pretty-printed (poking at new endpoints)
 .build/debug/NimbusLevitonBar --put PATH JSON raw PUT (record fields the app never writes)
 .build/debug/NimbusLevitonBar --dump-menu P   the rows with sample data → PNG, light and dark
+.build/debug/NimbusLevitonBar --dump-internals P  the Internals panel with sample data → PNG
 .build/debug/NimbusLevitonBar --check-update  the release feed as the updater reads it
 ```
 
@@ -130,7 +133,8 @@ same behaviour at the real ttl, and a guard if the server ever hands back a shor
 flat day would make a session stale the instant it was issued and log in once per command.
 
 **Inspecting the menu** goes through the accessibility API (needs Accessibility permission for
-the terminal; screen capture is a separate permission and may not be granted):
+the terminal — it *is* granted as of 2026-08-25, so check before believing an old note that
+says otherwise; screen capture is a separate permission and may not be granted):
 
 ```
 osascript -e 'tell application "System Events" to tell process "NimbusLevitonBar"
@@ -141,6 +145,16 @@ osascript -e 'tell application "System Events" to tell process "NimbusLevitonBar
   key code 53
 end tell'
 ```
+
+**The Internals panel, unlike the menu rows, reads back through AX in full** — which is how it
+was checked against the real account without a screen grab. `click (first menu item of m whose name is "Internals…")`
+(AX lists the alternate whether ⌥ is held or not) opens it; then
+`value of static text 1 of window 1` is the state header, `rows of table 1 of scroll area 1 of
+splitter group 1 of window 1` is the log, `select row N of t` picks one and
+`value of text area 1 of scroll area 2 of splitter group 1 of window 1` is its detail pane.
+`click button "Copy" of window 1` puts the whole visible log on the clipboard — the quickest
+way to read it (save and restore `pbpaste` around it). Beware `line` is a reserved word in
+AppleScript.
 
 The sign-in alert is `window 1` (`text field 1` email, `text field 2` password, buttons
 `Sign In` / `Cancel`). View-based rows (devices, rooms, All Lights, the status line) have no
@@ -295,7 +309,70 @@ update) apply.
 - **2FA (406) / bad code (408):** the store parks the login in `awaitingCode`; the controller
   asks for the code and signs in again with it.
 
+## The Internals panel (Diagnostics.swift, InternalsPanel.swift)
+
+⌥ over the version line turns it into **Internals…**, which opens a floating window on the
+app's network life: the feed's state, every REST request with its body and its reply, every
+websocket frame, and the app's own milestones. It exists because the alternative was reading
+`--watch` in a terminal, which cannot see the REST side at all, and only from launch.
+
+- **`Diagnostics.shared` records from launch, panel or no panel** — a ring buffer (2000
+  events; only the newest 200 keep their bodies, each capped at `detailLimit`). The failures
+  worth seeing happen before anyone opens the window. It is a plain `@unchecked Sendable` class
+  with one `NSLock`, called from the URLSession callbacks, the realtime queue and the main
+  actor; no callback is made while the lock is held and it touches no AppKit, so the CLI links
+  it harmlessly too.
+- **Nothing secret goes in, and there is no reveal switch.** Three places do the redacting:
+  `LevitonRealtime.send` logs a *rebuilt* token frame (`id` → fingerprint) rather than the
+  frame it sends; `Diagnostics.redactedBody` drops `password` and the 2FA `code` from a request
+  body; `Diagnostics.responseBody` rebuilds the `Person/login` reply, since that reply *is* the
+  token — and withholds it entirely if it cannot be parsed, because a body we cannot understand
+  is one we cannot redact. `Authorization` is never recorded at all. A token appears only as
+  `Diagnostics.fingerprint` — six hex of its SHA-256, enough to see that a re-login changed it.
+- **Copy takes the header and the one-line log, never the bodies.** A device record carries
+  `lat`/`long`, `mac`, `localIP` and the serial; the panel showing that to the owner is fine,
+  a clipboard bound for a GitHub issue is not.
+- **The panel never reaches into the realtime queue.** `LevitonRealtime` pushes what it knows
+  (state, since, frames, subscriptions, backoff, next reconnect, last ping/pong) into
+  `Diagnostics.feed`, and the panel reads that. Its header dot follows *the feed's own* record;
+  `DeviceStore.isLive` — what the menu says — is printed beside it only when the two disagree,
+  which would itself be a bug.
+- **It polls, it is not called back.** A 4 Hz `.common` timer (so it keeps running while a menu
+  is tracked, which is exactly when someone is watching) reloads only when
+  `Diagnostics.version` has moved. Auto-scroll follows the tail unless a row is selected or the
+  list has been scrolled up. Pause freezes the view, not the recording.
+- **The three buttons are the paths the app already uses** — `reconnectFeed()`, `refresh()` and
+  `forceRelogin()` on the store; nothing here writes to a device. `forceRelogin` asks first:
+  repeated sign-ins are what lock a My Leviton account.
+- **`--dump-internals PATH`** renders it with a seeded session's worth of events, both
+  appearances, the same trick as `--dump-menu` — and `InternalsPreview.seed()` is where to add
+  a case worth eyeballing.
+
 ## Traps already found (don't re-learn these)
+
+- **⌥ swapping a menu item is an *alternate item*, and it has three conditions.** The item must
+  come directly after the one it replaces, carry the same key equivalent (both `""` here), and
+  have `isAlternate = true` with `keyEquivalentModifierMask = .option`; the item above it gets
+  `keyEquivalentModifierMask = []` so its own default (`.command`) doesn't muddy the match.
+  AppKit then swaps them live while the menu is open, which deciding at build time (reading
+  `NSEvent.modifierFlags` in `menuNeedsUpdate`) would not.
+- **A wrapping `NSTextField` in an autolayout column will eat the window's spare height.** The
+  Internals header, pinned above a stack of controls above a split view, took ~250 pt of slack
+  and left the split view a sliver — nothing looked broken, the list was simply not there.
+  `setContentHuggingPriority(.required, for: .vertical)` on the header and the control stack
+  hands the slack to the split view instead. `--dump-internals` is what showed it.
+- **An `NSSplitView`'s divider starts where the panes' frames say it does.** Arranged subviews
+  added with zero frames come out zero-high; set each pane's frame before the first layout
+  (320/160 here) and the ratio is what you asked for.
+- **A panel that holds its store weakly needs the preview to hold it.** `InternalsPreview`
+  builds a throwaway `DeviceStore`; as a temporary it was deallocated before the header was
+  drawn, and the compiler said so ("weak reference will always be nil"). Keep it in a local and
+  `withExtendedLifetime` it.
+- **`isReleasedWhenClosed = false` on any panel the menu reopens** — the default releases it on
+  close, and the second visit is a crash.
+- **A truncated JSON body is no longer JSON.** The detail pane pretty-prints on selection, so
+  `detailLimit` is 96 KB: this account's `Residences/{id}/iotSwitches` reply is 51 KB and would
+  otherwise arrive as an unreadable single line.
 
 - **A README hero image is not the link preview.** What chat apps, Slack and Twitter show for
   a GitHub URL is `og:image`, and that is either a picture uploaded under the repo's

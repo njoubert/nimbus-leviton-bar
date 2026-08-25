@@ -97,6 +97,18 @@ reconnects when the Mac wakes, and when you click **Refresh**. Whatever happens 
 once-a-minute fetch is still there — a feed that dies quietly costs you up to a minute's delay,
 never a wrong reading.
 
+**Internals** — hold ⌥ over the version line at the bottom of the menu and it turns into
+**Internals…**, which opens a window on what the app is doing on the network: the push feed's
+state (how long it has been up, how many devices it is subscribed to, frames seen, the last
+ping's round trip), every request to My Leviton with what was sent and what came back, every
+websocket frame, and the app's own milestones — with buttons to reconnect the feed, fetch now,
+or sign in again. It records from launch, so whatever went wrong ten minutes ago is still
+there to look at. Nothing secret goes into it: the password never appears, and the session
+token only as a fingerprint (`#a3f19c`) — enough to see that it changed, no use to anyone
+else. **Copy** puts the summary and the one-line log on the clipboard, ready for a bug report;
+it deliberately leaves the bodies out, since a device record carries your address, MAC and
+local IP.
+
 ## Setting up
 
 1. **Install it** — `./build.sh install` builds a release copy into `/Applications`, launches

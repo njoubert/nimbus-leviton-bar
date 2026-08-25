@@ -77,7 +77,10 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
         queue.async {
             let new = Set(ids).subtracting(self.deviceIds)
             self.deviceIds = Set(ids)
-            if self.ready { for id in new { self.subscribe(id) } }
+            if self.ready {
+                for id in new { self.subscribe(id) }
+                Diagnostics.shared.feed { $0.subscriptions = self.deviceIds.count }
+            }
         }
     }
 
@@ -95,6 +98,12 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
         t.resume()
         receive(t, generation)
         log("connecting")
+        Diagnostics.shared.feed {
+            $0.state = "connecting"
+            $0.since = Date()
+            $0.nextReconnect = nil
+            $0.connects += 1
+        }
     }
 
     private func teardown() {
@@ -103,12 +112,24 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
         ready = false
+        Diagnostics.shared.feed {
+            $0.state = self.stopped ? "stopped" : "down"
+            $0.since = Date()
+            $0.subscriptions = 0
+            $0.lastPing = nil
+            $0.lastPong = nil
+        }
     }
 
     private func reconnect(after delay: TimeInterval) {
         guard !stopped else { return }
         let gen = generation
         log("reconnecting in \(Int(delay)) s")
+        Diagnostics.shared.feed {
+            $0.state = delay >= 3600 ? "backing off after an auth rejection" : "backing off"
+            $0.backoff = delay
+            $0.nextReconnect = Date().addingTimeInterval(delay)
+        }
         queue.asyncAfter(deadline: .now() + delay) { [weak self] in
             // `connect()` bumps the generation, so a `reconnectNow()` in the meantime makes
             // this one stale — firing it would kill the connection it just made.
@@ -153,6 +174,7 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
         // pending `receive`. Without this guard a single drop scheduled three reconnects and
         // trebled the backoff (1 s → 8 s instead of 1 s → 2 s).
         guard task != nil else { return }
+        Diagnostics.shared.feed { $0.drops += 1 }
         teardown()
         if authFailure {
             reconnect(after: 3600)
@@ -189,6 +211,8 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
 
     private func handle(_ text: String) {
         log("← \(text)")
+        Diagnostics.shared.record(.ws, Diagnostics.frameSummary(text, outgoing: false), detail: text)
+        Diagnostics.shared.feed { $0.frames += 1; $0.lastFrame = Date() }
         guard let data = text.data(using: .utf8),
               let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = j["type"] as? String else { return }
@@ -201,6 +225,13 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
                 backoff = 1
                 for id in deviceIds { subscribe(id) }
                 startPing()
+                Diagnostics.shared.feed {
+                    $0.state = "live"
+                    $0.since = Date()
+                    $0.backoff = 1
+                    $0.nextReconnect = nil
+                    $0.subscriptions = self.deviceIds.count
+                }
             }
         case "notification":
             guard let n = j["notification"] as? [String: Any],
@@ -223,10 +254,28 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
     private func send(_ obj: [String: Any]) {
         guard let t = task, let data = try? JSONSerialization.data(withJSONObject: obj),
               let s = String(data: data, encoding: .utf8) else { return }
-        log("→ \(s.hasPrefix("{\"token\"") ? "{\"token\": …}" : s)")
+        // Never the frame itself: the token frame carries the session token. What is logged
+        // (and what the Internals panel shows) is a copy with the token fingerprinted, which
+        // still says whether the session changed and what ttl the server was given.
+        let safe = Self.redacted(obj).flatMap(Diagnostics.json) ?? s
+        log("→ \(safe)")
+        Diagnostics.shared.record(.ws, Diagnostics.frameSummary(safe, outgoing: true), detail: safe)
         t.send(.string(s)) { [weak self] e in
-            if let e { self?.queue.async { self?.log("send failed: \(e.localizedDescription)") } }
+            if let e {
+                self?.queue.async { self?.log("send failed: \(e.localizedDescription)") }
+                Diagnostics.shared.record(.app, "feed: send failed — \(e.localizedDescription)", isError: true)
+            }
         }
+    }
+
+    /// The token frame with its token replaced by a fingerprint. Every other frame we send
+    /// (a subscribe) is already safe.
+    private static func redacted(_ obj: [String: Any]) -> [String: Any]? {
+        guard var token = obj["token"] as? [String: Any] else { return obj }
+        token["id"] = (token["id"] as? String).map(Diagnostics.fingerprint) ?? "«hidden»"
+        var out = obj
+        out["token"] = token
+        return out
     }
 
     /// The access-token object, as the login reply gave it (the server wants the record, not
@@ -250,18 +299,24 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
             let deadline = DispatchWorkItem { [weak self] in
                 guard let self, self.generation == gen else { return }
                 self.log("pong timed out after \(Int(Self.pongTimeout)) s")
+                Diagnostics.shared.record(.app, "feed: no pong in \(Int(Self.pongTimeout)) s — the connection is open but dead", isError: true)
                 self.handleDrop(authFailure: false)
             }
             self.pongDeadline?.cancel()
             self.pongDeadline = deadline
             self.queue.asyncAfter(deadline: .now() + Self.pongTimeout, execute: deadline)
+            let sent = Date()
+            Diagnostics.shared.feed { $0.lastPing = sent; $0.lastPong = nil }
             t.sendPing { [weak self] e in
                 self?.queue.async {
                     guard let self, self.generation == gen, t === self.task else { return }
                     deadline.cancel()
                     if let e {
                         self.log("ping failed: \(e.localizedDescription)")
+                        Diagnostics.shared.record(.app, "feed: ping failed — \(e.localizedDescription)", isError: true)
                         self.handleDrop(authFailure: false)
+                    } else {
+                        Diagnostics.shared.feed { $0.lastPong = Date().timeIntervalSince(sent) }
                     }
                 }
             }
@@ -270,7 +325,11 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
         pingTimer = timer
     }
 
+    /// stderr under `--watch`, and — for everything but the frames, which are recorded with
+    /// their own summaries — a line in the Internals panel's App stream.
     private func log(_ s: String) {
         if verbose { fputs("[realtime] \(s)\n", stderr) }
+        guard !s.hasPrefix("→"), !s.hasPrefix("←") else { return }
+        Diagnostics.shared.record(.app, "feed: \(s)", isError: s.contains("failed") || s.contains("timed out"))
     }
 }

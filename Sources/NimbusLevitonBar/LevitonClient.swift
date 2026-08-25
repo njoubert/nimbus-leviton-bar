@@ -294,6 +294,13 @@ final class LevitonClient: Sendable {
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
 
+        // The Internals panel's record of this call. Bodies are redacted on the way in
+        // (`Diagnostics.redactedBody`); the `Authorization` header is never recorded at all.
+        let event = Diagnostics.shared.beginRequest(method: method, url: req.url!, path: path, body: body)
+        let started = Date()
+        var answered = false
+        defer { if !answered { Diagnostics.shared.abandonRequest(event, method: method, path: path, url: req.url!, started: started) } }
+
         var attempt = 0
         while true {
             attempt += 1
@@ -303,12 +310,21 @@ final class LevitonClient: Sendable {
                 data = d
                 resp = r as! HTTPURLResponse
             } catch let e as URLError where attempt == 1 && e.code == .networkConnectionLost {
+                Diagnostics.shared.noteRetry(event, "the server dropped a kept-alive connection")
                 continue   // the server closed a kept-alive connection under us
+            } catch {
+                answered = true
+                Diagnostics.shared.failRequest(event, method: method, path: path, url: req.url!, started: started, error: error)
+                throw error
             }
             if (502...504).contains(resp.statusCode), attempt == 1 {
+                Diagnostics.shared.noteRetry(event, "\(resp.statusCode) from the gateway")
                 try await Task.sleep(nanoseconds: 800_000_000)
                 continue
             }
+            answered = true
+            Diagnostics.shared.endRequest(event, method: method, path: path, url: req.url!,
+                                          status: resp.statusCode, started: started, data: data)
             let json = (try? JSONSerialization.jsonObject(with: data)) ?? NSNull()
             if (200..<300).contains(resp.statusCode) { return json }
 

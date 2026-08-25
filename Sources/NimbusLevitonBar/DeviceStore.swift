@@ -92,6 +92,7 @@ final class DeviceStore {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.session != nil else { return }
+                Diagnostics.shared.record(.app, "the Mac woke: reconnecting the feed and refetching")
                 self.realtime?.reconnectNow()
                 self.refresh()
             }
@@ -103,17 +104,23 @@ final class DeviceStore {
     func start() -> Bool {
         let login = Keychain.loadLogin()
         email = login?.email
-        if let s = Keychain.loadSession(), s.isFresh {
+        let saved = Keychain.loadSession()
+        if let s = saved, s.isFresh {
             session = s
+            Diagnostics.shared.setSession(s)
+            Diagnostics.shared.record(.app, "launch: using the saved session")
             state = .loading
             startPolling()
             refresh()
             return true
         }
         if let login {
+            Diagnostics.shared.record(.app, saved == nil ? "launch: no saved session, signing in with the saved password"
+                                                         : "launch: the saved session is stale, signing in again")
             signIn(login, remember: false)
             return true
         }
+        Diagnostics.shared.record(.app, "launch: nothing saved in the Keychain\(Keychain.readFailureHint)")
         state = .signedOut
         notify()
         return false
@@ -124,6 +131,7 @@ final class DeviceStore {
     private(set) var awaitingCode: Keychain.Login?
 
     func signIn(_ login: Keychain.Login, code: String? = nil, remember: Bool = true) {
+        Diagnostics.shared.record(.app, "signing in as \(login.email)\(code != nil ? " with a two-factor code" : "")")
         state = .signingIn
         email = login.email
         awaitingCode = nil
@@ -135,6 +143,9 @@ final class DeviceStore {
                 if remember { try Keychain.saveLogin(login) }
                 try? Keychain.saveSession(s)
                 session = s
+                Diagnostics.shared.setSession(s)
+                Diagnostics.shared.record(.app, "signed in: session \(Diagnostics.fingerprint(s.token))"
+                    + (s.expiry.map { ", good until \(LevitonClient.iso.string(from: $0))" } ?? ""))
                 lastError = nil
                 state = .loading
                 notify()
@@ -142,6 +153,8 @@ final class DeviceStore {
                 refresh()
             } catch {
                 session = nil
+                Diagnostics.shared.setSession(nil)
+                Diagnostics.shared.record(.app, "sign-in failed: \(Self.describe(error))", isError: true)
                 if case LevitonClient.Error.twoFactorRequired = error { awaitingCode = login }
                 state = .error(Self.describe(error))
                 notify()
@@ -151,6 +164,8 @@ final class DeviceStore {
 
     /// Forget the session and the password. The server side is told too (best effort).
     func signOut() {
+        Diagnostics.shared.record(.app, "signing out: forgetting the session and the password")
+        Diagnostics.shared.setSession(nil)
         if let s = session { Task { await client.logout(s) } }
         stopPolling()
         session = nil
@@ -194,6 +209,9 @@ final class DeviceStore {
                     }
                 }
                 if out.isEmpty, !skipped.isEmpty { throw LevitonClient.Error.unauthorized }
+                Diagnostics.shared.record(.app, "fetched \(out.map(\.devices.count).reduce(0, +)) devices in "
+                    + "\(out.count) residence\(out.count == 1 ? "" : "s")"
+                    + (skipped.isEmpty ? "" : ", no access to \(skipped.joined(separator: ", "))"))
                 checkFeedDelivered(out)
                 residences = out
                 lastRefresh = Date()
@@ -206,6 +224,7 @@ final class DeviceStore {
                 handleUnauthorized()
             } catch {
                 lastError = Self.describe(error)
+                Diagnostics.shared.record(.app, "fetch failed: \(lastError!)", isError: true)
                 state = residences.isEmpty ? .error(lastError!) : .ready
                 notify()
             }
@@ -224,12 +243,17 @@ final class DeviceStore {
     private func handleUnauthorized() {
         Keychain.deleteSession()
         session = nil
+        Diagnostics.shared.setSession(nil)
         stopPolling()
         let recent = lastRelogin.map { Date().timeIntervalSince($0) < Self.reloginCooldown } ?? false
         if !recent, let login = Keychain.loadLogin() {
+            Diagnostics.shared.record(.app, "My Leviton rejected the session — replaying the saved password once", isError: true)
             lastRelogin = Date()
             signIn(login, remember: false)
         } else {
+            Diagnostics.shared.record(.app, recent
+                ? "My Leviton rejected a session that is minutes old — not signing in again for \(Int(Self.reloginCooldown / 60)) min"
+                : "session rejected and no password saved", isError: true)
             state = .error(recent ? "My Leviton keeps rejecting the session — will try again later" : "session expired")
             notify()
             if recent {
@@ -249,6 +273,35 @@ final class DeviceStore {
         if !isLive { realtime?.reconnectNow() }
         refresh()
     }
+
+    /// The Internals panel's three buttons. They are the same paths the menu and the timers
+    /// use — nothing here is a private back door, and none of them touches a device.
+    func reconnectFeed() {
+        Diagnostics.shared.record(.app, "Internals: reconnect the feed")
+        if let rt = realtime { rt.reconnectNow() } else { startRealtime() }
+    }
+
+    /// Drop the token and replay the saved password, once, on demand. The cooldown that
+    /// guards the automatic path is reset with it: this is a person asking, not a loop.
+    func forceRelogin() {
+        Diagnostics.shared.record(.app, "Internals: forcing a new sign-in")
+        guard let login = Keychain.loadLogin() else {
+            lastError = "no password saved — sign in from the menu"
+            notify()
+            return
+        }
+        if let s = session { Task { await client.logout(s) } }
+        Keychain.deleteSession()
+        session = nil
+        Diagnostics.shared.setSession(nil)
+        stopPolling()
+        lastRelogin = nil
+        signIn(login, remember: false)
+    }
+
+    /// For the panel's header.
+    var writesInFlight: Int { inFlight.values.reduce(0, +) }
+    var pollActive: Bool { pollTimer != nil }
 
     func refreshIfStale() {
         if let t = lastRefresh, Date().timeIntervalSince(t) < Self.openRefreshMinAge { return }
@@ -320,6 +373,9 @@ final class DeviceStore {
                 // %@, not the string itself: a device name is user data and can hold a %.
                 NSLog("%@", "realtime: the poll found \(d.name) at \(d.power ? "on" : "off") "
                     + "\(d.brightness)% and the feed never said so — reconnecting")
+                Diagnostics.shared.record(.app, "the feed missed a change: the fetch found \(d.name) at "
+                    + "\(d.power ? "on" : "off") \(d.brightness)% (we held \(old.power ? "on" : "off") "
+                    + "\(old.brightness)%) — dropping \"live\" and reconnecting", isError: true)
                 isLive = false
                 realtime?.reconnectNow()
                 return
@@ -377,6 +433,7 @@ final class DeviceStore {
         }
         Self.recomputeRooms(&residences[ri])
         notify()
+        Diagnostics.shared.record(.app, "\(room.name): room \(on ? "On" : "Off") (My Leviton's own, every device in the room)")
         Task {
             do {
                 try await client.setRoomPower(s, roomId: roomId, on: on)
@@ -458,6 +515,9 @@ final class DeviceStore {
     /// for.
     private func send(id: String, before: Device, writes: [LevitonClient.DeviceFields]) {
         guard let s = session, let first = writes.first else { return }
+        Diagnostics.shared.record(.app, "\(before.name): " + writes.map(\.description)
+            .joined(separator: ", then (after \(Self.onSettle)) ")
+            + (writes.count > 1 ? "  [comes on at preset \(before.presetLevel ?? 0)]" : ""))
         inFlight[id, default: 0] += 1
         Task {
             defer { if let n = inFlight[id], n > 1 { inFlight[id] = n - 1 } else { inFlight[id] = nil } }
@@ -481,6 +541,7 @@ final class DeviceStore {
             } catch {
                 if let (ri, di) = locate(id) { residences[ri].devices[di] = before; Self.recomputeRooms(&residences[ri]) }
                 lastError = "\(before.name): \(Self.describe(error))"
+                Diagnostics.shared.record(.app, "\(before.name): write failed, row snapped back — \(Self.describe(error))", isError: true)
                 notify()
                 if case LevitonClient.Error.unauthorized = error { refresh() }   // triggers re-login
             }

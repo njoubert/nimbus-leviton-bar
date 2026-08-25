@@ -16,6 +16,7 @@ import NimbusUpdater
 //   --render-social PATH    write the GitHub social preview card (1280×640) and exit
 //   --dump-bar PATH         render just the status item to PATH, quit (layout check)
 //   --dump-menu PATH        render the menu's rows with sample data to PATH, quit (layout check)
+//   --dump-internals PATH   render the Internals panel with sample data to PATH, quit (layout check)
 //
 // Command-line use of the same client (no UI; the login/session come from the Keychain):
 //   --login EMAIL           ask for the password (or take $MYLEVITON_PASSWORD), sign in, save both; exit
@@ -31,7 +32,8 @@ func usage() -> Never {
                             [--render-icon PATH [--size PX]] [--render-iconset DIR]
                             [--render-social PATH]
                             [--login EMAIL | --logout | --print | --set DEVICE on|off|N | --watch]
-                            [--room ROOM on|off | --get PATH | --put PATH JSON | --dump-menu PATH]
+                            [--room ROOM on|off | --get PATH | --put PATH JSON]
+                            [--dump-menu PATH | --dump-internals PATH]
                             [--check-update | --preflight APP.app]
     """)
     exit(2)
@@ -75,6 +77,13 @@ while !args.isEmpty {
         MainActor.assumeIsolated {
             let ok = MenuRowPreview.write(to: path)
             print(ok ? "wrote \(path)" : "menu dump failed")
+            exit(ok ? 0 : 1)
+        }
+    case "--dump-internals":
+        let path = takeValue(a)
+        MainActor.assumeIsolated {
+            let ok = InternalsPreview.write(to: path)
+            print(ok ? "wrote \(path)" : "internals dump failed")
             exit(ok ? 0 : 1)
         }
     case "--login": cli = .login(email: takeValue(a))

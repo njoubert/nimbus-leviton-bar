@@ -28,6 +28,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var askingForCode = false
     private var agoTimer: Timer?
     private var versionItem: NSMenuItem?
+    /// Built the first time ⌥ + the version line asks for it, and kept: it holds a scroll
+    /// position, a filter and a window frame worth returning to.
+    private var internals: InternalsPanel?
 
     init(store: DeviceStore, updater: Updater? = nil) {
         self.store = store
@@ -159,9 +162,22 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         version.target = self
         version.representedObject = versionText   // copy the version, not the update note
         version.toolTip = "Click to copy"
+        version.keyEquivalentModifierMask = []    // so the ⌥ alternate below is what ⌥ picks
         menu.addItem(version)
         versionItem = version
         updateVersionRow()
+
+        // Hold ⌥ and the version line becomes "Internals…". An alternate item is AppKit's own
+        // mechanism for this (same empty key equivalent as the item above it, `isAlternate`,
+        // and it must sit directly after it), so it swaps live while the menu is open rather
+        // than being decided when the menu was built. Not a feature of the lights: it opens
+        // the network diagnostic (`InternalsPanel.swift`).
+        let internalsItem = NSMenuItem(title: "Internals…", action: #selector(showInternals), keyEquivalent: "")
+        internalsItem.target = self
+        internalsItem.isAlternate = true
+        internalsItem.keyEquivalentModifierMask = .option
+        internalsItem.toolTip = "The websocket, the REST traffic and the app's own state, live"
+        menu.addItem(internalsItem)
         menu.addItem(NSMenuItem(title: "Quit Nimbus Leviton Bar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
@@ -299,6 +315,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             try LoginItem.setEnabled(!LoginItem.isEnabled)
             UserDefaults.standard.set(true, forKey: LoginItem.registeredDefaultsKey)
         } catch { NSLog("login item: \(error)") }
+    }
+
+    /// ⌥ over the version line. The panel floats, so it can be watched while the menu is
+    /// open and lights are being clicked.
+    @objc private func showInternals() {
+        if internals == nil { internals = InternalsPanel(store: store, updater: updater) }
+        internals?.show()
     }
 
     @objc private func copyValue(_ sender: NSMenuItem) {
