@@ -27,7 +27,7 @@ always — there is no reveal switch, the same rule the app's Internals panel fo
 | Path | Result |
 |---|---|
 | `ssap://settings/setSystemSettings` | **`401 insufficient permissions`** — as a string and as a number, both |
-| `createAlert` → `onClose` → `luna://com.webos.settingsservice/setSystemSettings` | **works** — `backlight` 100 → 75, still 75 at 2 s and at 5 s, restored cleanly |
+| `createAlert` → `onClose` → `luna://com.webos.settingsservice/setSystemSettings` | **works, and visibly** — `backlight` 100 → 20 dimmed the panel plainly, and the TV's own Pixel Brightness slider moved to 20 with it |
 | `ssap://settings/getSystemSettings` | works |
 | subscribe to `getSystemSettings` | works — the TV pushes partial updates of its own accord |
 
@@ -58,10 +58,16 @@ only path there is.
 - **The bridge is not fragile in the way "privilege hack" suggests** — it wrote through
   **Filmmaker Mode**, which the plan expected to lock the control, and the value held. The
   plan's fear was the wrong one.
+- **`backlight` really is OLED Pixel Brightness, confirmed by eye.** Writing 20 dimmed the room
+  and drove the television's own Pixel Brightness slider to 20 on screen. The value is applied,
+  not merely stored — which a read-back on its own could never have shown.
 - **`externalpq` is still in this set's service list**, so the webOS 26 calibration removal has
   not landed here yet. Whether the bridge survives it is still unknown and still the real risk.
-- The firmware version could not be read: `getCurrentSWInformation` needs `READ_UPDATE_INFO`,
-  which is one of the permissions we do not get.
+- **Firmware `43.21.71`, and the set reports it as the latest available** — webOS 26 is not
+  being offered to this television yet, and its Auto Update is now off (2026-08-25), so it will
+  not arrive unasked. Not readable over SSAP: `getCurrentSWInformation` needs
+  `READ_UPDATE_INFO`, one of the permissions an unsigned manifest does not get. It is on the
+  set's own Support → Software Update screen.
 
 ## Traps found here (they cost hours; don't re-learn them)
 

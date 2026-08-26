@@ -19,7 +19,7 @@ detail and the traps; this is the verdict.
 | Path | Result |
 |---|---|
 | `ssap://settings/setSystemSettings` | **`401 insufficient permissions`**, as a string and as a number |
-| `createAlert` → `onClose` → `luna://com.webos.settingsservice/setSystemSettings` | **works** — `backlight` 100 → 75, held at 2 s and 5 s, restored |
+| `createAlert` → `onClose` → `luna://com.webos.settingsservice/setSystemSettings` | **works, and visibly** — `backlight` 100 → 20 plainly dimmed the panel and moved the TV's own Pixel Brightness slider |
 | `getSystemSettings`, and subscribing to it | both work; the TV pushes partial updates unprompted |
 
 **LG has closed the native write to third-party apps and left the bridge open**, and each link
@@ -44,12 +44,15 @@ cut in favour of the bridge being better than the plan assumed:
 
 - It wrote straight through **Filmmaker Mode**, which this document expected to lock the
   control. That trap is not real on this set.
-- `externalpq` is still in the service list, so webOS 26 has not reached this television.
-  Whether the bridge survives it is unknown, and is now the *whole* risk rather than one of
-  several.
+- `externalpq` is still in the service list, and the set is on firmware **`43.21.71`**, which it
+  reports as the latest available — so webOS 26 has not reached this television and is not being
+  offered. Auto Update was turned off on 2026-08-25, so the timing of that door is ours.
 
 The remaining question is therefore not technical but a build-vs-buy call on a single
-unofficial mechanism — see "The four options considered".
+unofficial mechanism — and **webOS 26 is no longer a differentiator in that call.** The options
+table below scores durability as though building would get the native path; it would not. A
+built version and BetterDisplay run on the *same* bridge and carry the *same* exposure. What is
+left to weigh is whether one menu surface is worth the week, not whether it lasts longer.
 
 ## What this is for
 
@@ -347,8 +350,10 @@ improves the existing code whether or not any LG work follows.
 - Whether the luna bridge survives webOS 26. Reporting so far names only the calibration options
   as removed, and this set still exposes `externalpq`, so it has not arrived here yet. **Now the
   only open risk that matters.**
-- ~~The set's current firmware version.~~ Not readable by us: `getCurrentSWInformation` needs
-  `READ_UPDATE_INFO`, one of the permissions an unsigned manifest does not get.
+- ~~The set's current firmware version.~~ **`43.21.71`**, read off the television's own
+  Support → Software Update screen, which also reports it as the latest available. Not readable
+  over SSAP: `getCurrentSWInformation` needs `READ_UPDATE_INFO`, one of the permissions an
+  unsigned manifest does not get.
 - The exact `betterdisplaycli` feature names on 4.3.6 — read from documentation and binary strings,
   not a live `--help`.
 
