@@ -1,0 +1,5 @@
+.build/
+.swiftpm/
+# The pairing credential. A client-key is a secret in the same sense a session token is:
+# whoever holds it can drive the television without touching the remote.
+.lgtv-key.json

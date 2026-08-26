@@ -11,6 +11,46 @@ Rendered versions of this document, with diagrams:
 - Findings — <https://claude.ai/code/artifact/53559878-dc3e-481e-b553-4a45e0180b0f>
 - Plan — <https://claude.ai/code/artifact/454298bd-7cab-4df3-bd93-ab8093510067>
 
+## Phase 0 result (2026-08-25): the native endpoint is closed, the bridge works
+
+Run with [`spikes/lgtv`](../spikes/lgtv), which is committed and kept. Its README carries the
+detail and the traps; this is the verdict.
+
+| Path | Result |
+|---|---|
+| `ssap://settings/setSystemSettings` | **`401 insufficient permissions`**, as a string and as a number |
+| `createAlert` → `onClose` → `luna://com.webos.settingsservice/setSystemSettings` | **works** — `backlight` 100 → 75, held at 2 s and 5 s, restored |
+| `getSystemSettings`, and subscribing to it | both work; the TV pushes partial updates unprompted |
+
+**LG has closed the native write to third-party apps and left the bridge open**, and each link
+was measured rather than inferred:
+
+1. The canonical community manifest is refused outright — **`403 Pairing rejected: blacklisted
+   certificate detected`**. LG has revoked the leaked `test-signing-cert` every client signs
+   with. It cannot pair at all.
+2. Dropping the `signatures` array pairs fine, but an unsigned app gets a fixed permission set
+   that excludes `WRITE_SETTINGS`.
+3. Hoisting `signed.permissions` to the top level changes nothing — `READ_UPDATE_INFO`, hoisted
+   alongside as a control, still gives `401` on `getCurrentSWInformation`. The manifest's
+   permission list is not the lever.
+4. `WRITE_NOTIFICATION_ALERT` *is* granted, which is precisely why the bridge works.
+
+So BetterDisplay does not use the bridge because it is old. It uses the bridge because it is
+the only path there is, and the "prefer the native endpoint" decision below has no native
+endpoint to prefer.
+
+**This is the gate, and on its own terms it says stop.** Two things complicate that, and both
+cut in favour of the bridge being better than the plan assumed:
+
+- It wrote straight through **Filmmaker Mode**, which this document expected to lock the
+  control. That trap is not real on this set.
+- `externalpq` is still in the service list, so webOS 26 has not reached this television.
+  Whether the bridge survives it is unknown, and is now the *whole* risk rather than one of
+  several.
+
+The remaining question is therefore not technical but a build-vs-buy call on a single
+unofficial mechanism — see "The four options considered".
+
 ## What this is for
 
 **One surface for the lighting in a room.** The Leviton dimmers set the room's light; the TV's OLED
@@ -289,7 +329,7 @@ Five rules keep a second vendor from infecting the first:
 
 | Phase | Work | Cost | Gate |
 |---|---|---|---|
-| 0 | **Spike.** Pair from a scratch script, read the picture settings, try the native endpoint, then the luna bridge. No app code, nothing committed. | ~1 day | **If neither writes `backlight` reliably, stop and use BetterDisplay.** The rest of this plan is void — a good outcome, cheaply reached. |
+| 0 | ~~**Spike.**~~ **Done 2026-08-25** — `spikes/lgtv`, committed and kept. | ~1 day | **Native path refused, bridge works.** See "Phase 0 result" above; the build-vs-buy call is open. |
 | 1 | **Extract `ReconnectingSocket`.** Pure refactor, no new features, no LG code. Commit separately so it can be reverted alone. | ~1 day | Forced-failure test passes and the app behaves identically. Ship before any LG code. |
 | 2 | **`SSAPSession` + discovery + pairing, CLI only.** Socket, request correlation, cert pinning, register handshake, Keychain item, SSDP with manual fallback. | ~2–3 days | `--tv-set backlight 40` changes the panel and `--tv-watch` shows the TV's own change arriving. |
 | 3 | **`TVStore`.** Main-actor state, optimistic writes with snap-back, capability probe, off/unreachable states, wake handling. | ~1–2 days | Mirrors `DeviceStore`'s patterns without sharing its code. |
@@ -301,13 +341,14 @@ improves the existing code whether or not any LG work follows.
 
 ## Open questions
 
-- **Does this G5 accept the native `settings/setSystemSettings`, or does it still need the luna
-  bridge?** This decides the whole plan. A read-only `getSystemSettings` answers it. Not tested —
-  pairing puts a prompt on the owner's live display and was deliberately not triggered.
+- ~~**Does this G5 accept the native `settings/setSystemSettings`?**~~ **Answered 2026-08-25: no** —
+  `401 insufficient permissions`, because `WRITE_SETTINGS` is not granted to an app that cannot
+  present a non-blacklisted signature. The luna bridge works. See the Phase 0 result above.
 - Whether the luna bridge survives webOS 26. Reporting so far names only the calibration options
-  as removed.
-- The set's current firmware version. It reports a 6.12 kernel, which is recent, but that does not
-  pin webOS 25 versus 26.
+  as removed, and this set still exposes `externalpq`, so it has not arrived here yet. **Now the
+  only open risk that matters.**
+- ~~The set's current firmware version.~~ Not readable by us: `getCurrentSWInformation` needs
+  `READ_UPDATE_INFO`, one of the permissions an unsigned manifest does not get.
 - The exact `betterdisplaycli` feature names on 4.3.6 — read from documentation and binary strings,
   not a live `--help`.
 
