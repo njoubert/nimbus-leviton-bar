@@ -1,0 +1,11 @@
+A window on what the app is doing on the network.
+
+Hold ⌥ over the version line at the bottom of the menu and it turns into **Internals…**. Open that and you get the app's whole conversation with My Leviton, live: the state of the push feed — how long it has been up, how many devices it is subscribed to, how many frames it has seen, what the last ping's round trip was — every request the app makes with what was sent and what came back, every message the feed pushes, and the app's own milestones: signing in, waking from sleep, a write that failed and snapped a row back.
+
+It records from launch, so it isn't a trap you have to set beforehand. Whatever went wrong ten minutes ago is still there when you go looking — a couple of thousand events, with the full bodies kept for the most recent few hundred. Click a line to read it in full.
+
+Three buttons do something rather than show something: **Reconnect Feed**, **Fetch Now** and **Sign In Again**. They are the same paths the app already takes on its own, and none of them touches a light. Signing in again asks first — repeated sign-ins are what get a My Leviton account locked. **Pause** freezes the view, not the recording.
+
+Nothing secret goes in, and there is no switch to reveal one. Your password never appears anywhere in it; the session token appears only as a fingerprint — `#a3f19c`, six characters of a hash, enough to see that it changed and no use to anyone. **Copy** puts the summary and the one-line log on the clipboard for a bug report, and deliberately leaves the bodies out: a device record from My Leviton carries your address, your MAC and your local IP, and those belong on your screen rather than in an issue.
+
+Signed with a Developer ID and notarized. Requires macOS 15 and Apple silicon.
