@@ -483,6 +483,7 @@ final class DeviceStore {
         }
         Self.recomputeRooms(&residences[ri])
         notify()
+        Diagnostics.shared.record(.app, "\(activity.name): running the scene (\(activity.actions.count) action\(activity.actions.count == 1 ? "" : "s"))")
         Task {
             do {
                 try await client.executeActivity(s, id: id)

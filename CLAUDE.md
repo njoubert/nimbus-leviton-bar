@@ -55,11 +55,12 @@ already found.
 Sources/NimbusLevitonBar/
   main.swift              flag parsing, AppDelegate, the hidden Edit menu, Login Item, the Updater
   Updates.swift           this app's UpdaterConfig: repo, bundle id, team, names, versions
-  CLI.swift               --login / --logout / --print / --set / --room / --watch / --get / --put
+  CLI.swift               --login / --logout / --print / --set / --room / --watch / --get / --put /
+                          --scenes / --scene
   LevitonClient.swift     REST: login, residences, devices, update, logout; error mapping
   LevitonRealtime.swift   the websocket: token → ready → subscribe → notifications; reconnect
   DeviceStore.swift       @MainActor state: sign-in, devices, optimistic writes, 60 s poll
-  Devices.swift           Device / Residence value types
+  Devices.swift           Device / Residence / Activity value types
   Keychain.swift          login (email+password) and session (token) as generic-password items
   DevCredentials.swift    the CLI-only .leviton login file and its cached session token
   SignInDialog.swift      NSAlert with email/password fields; the 2FA code prompt
@@ -462,8 +463,9 @@ websocket frame, and the app's own milestones. It exists because the alternative
   web app's own list is `getNonButtonActivitiesForResidence()` (`!isButtonActivity`).
   `position` is null on every activity, as on rooms: the API's listing order is the order.
 - **`customIcon` is one of 41 fixed names** (`all-on`, `goodnight`, `party`, `movie`…) but
-  owners pick them freely — on this account "Good Morning" is `dinner` and "I'm Home" is
-  `away`. Drawing a glyph from it would be worse than drawing none.
+  owners pick them freely — in Aug 2026 this account had a "Good Morning" set to `dinner` and
+  an "I'm Home" set to `away` (the activities have since been rebuilt and now happen to
+  match). Drawing a glyph from it would be worse than drawing none.
 - **`execute` does push realtime frames** (verified 2026-08-22): each action arrived as an
   IotSwitch `saved` notification within 1–3 s, in two waves — the cloud write, then the
   device's confirmation. Offline devices get a cloud-side frame too (the offline `760 Fridge`

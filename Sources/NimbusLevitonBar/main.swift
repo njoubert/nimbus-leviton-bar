@@ -35,6 +35,7 @@ func usage() -> Never {
                             [--render-social PATH]
                             [--login EMAIL | --logout | --print | --set DEVICE on|off|N | --watch]
                             [--room ROOM on|off | --get PATH | --put PATH JSON]
+                            [--scenes | --scene NAME]
                             [--dump-menu PATH | --dump-internals PATH]
                             [--check-update | --preflight APP.app]
     """)
