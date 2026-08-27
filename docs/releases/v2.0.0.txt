@@ -1,0 +1,9 @@
+Scenes.
+
+Your My Leviton **Activities** — the saved sets of devices and levels you build in the app ("Morning", "Late Night") — now sit in their own section of the menu, right under All Devices. Click one and it runs exactly as the My Leviton app or a Leviton scene button would run it: the device rows underneath move the moment you click, and the push feed confirms them a second later. The menu stays open, so you can watch it land. Hover a scene to see what it sets, device by device.
+
+Scenes are read-only here by design. Create and edit them in the My Leviton app; the menu picks them up on its next refresh. A scene has no state of its own, so its row shows no dot and no tally — what changes is the lights. An account with no Activities sees no section, and a scene that My Leviton won't run reports why in the status line.
+
+The command line grew the same feature: `--scenes` lists every Activity and what each one sets, `--scene NAME` runs one.
+
+Signed with a Developer ID and notarized. Requires macOS 15 and Apple silicon.
