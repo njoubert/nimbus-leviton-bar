@@ -25,6 +25,8 @@ import NimbusUpdater
 //   --set DEVICE on|off|N   turn a device (name or id) on/off or set its level; exit
 //   --watch                 print realtime updates as they arrive (Ctrl-C to stop)
 //   --get PATH              raw GET of an API path (e.g. Residences/1/residentialRooms), pretty-printed
+//   --scenes                the residence's My Leviton Activities and what each one sets
+//   --scene NAME            run one Activity (ResidentialActivities/execute)
 
 func usage() -> Never {
     print("""
@@ -33,6 +35,7 @@ func usage() -> Never {
                             [--render-social PATH]
                             [--login EMAIL | --logout | --print | --set DEVICE on|off|N | --watch]
                             [--room ROOM on|off | --get PATH | --put PATH JSON]
+                            [--scenes | --scene NAME]
                             [--dump-menu PATH | --dump-internals PATH]
                             [--check-update | --preflight APP.app]
     """)
@@ -96,6 +99,8 @@ while !args.isEmpty {
     case "--put":
         let path = takeValue(a), json = takeValue(a)
         cli = .put(path: path, json: json)
+    case "--scenes": cli = .scenes
+    case "--scene": cli = .scene(name: takeValue(a))
     case "--set":
         let device = takeValue(a), value = takeValue(a)
         cli = .set(device: device, value: value)

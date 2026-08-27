@@ -19,6 +19,8 @@ struct ResidenceInfo: Equatable, Sendable {
 ///   GET  Residences/{id}/residentialRooms    → [{id, name, power, …}]
 ///   PUT  IotSwitches/{id}  {"power":"ON"|"OFF","brightness":n} → the full IotSwitch
 ///   POST ResidentialRooms/turnOn?id=N  (and turnOff)   the room switch, server-side
+///   GET  Residences/{id}/residentialActivities?filter={"include":["residentialActions"]}
+///   POST ResidentialActivities/execute?id=N            run a scene, server-side
 ///   POST Person/logout
 /// The token goes in `Authorization: <token>` — bare, no "Bearer". Ids are integers in the
 /// JSON; they are carried as strings here.
@@ -196,6 +198,32 @@ final class LevitonClient: Sendable {
     private static let roomOrderPrefix = "sorting$residence:"
     private static let roomOrderSuffix = "$rooms"
 
+    /// The residence's scenes ("Activities" in My Leviton), each with what it does. The
+    /// `include` pulls the `residentialActions` in the same request, as the web app does.
+    /// Button activities are dropped: they belong to a 4-button controller, and the app's own
+    /// list filters them out too.
+    func activities(_ s: Keychain.Session, residenceId: String) async throws -> [Activity] {
+        let filter = #"{"include":["residentialActions"]}"#
+        let json = try await request("GET", "Residences/\(residenceId)/residentialActivities",
+                                     query: ["filter": filter], token: s.token)
+        guard let rows = json as? [[String: Any]] else { throw Error.malformed("residentialActivities") }
+        return rows.compactMap { r in
+            guard let id = Self.idString(r["id"]), (r["isButtonActivity"] as? Bool) != true else { return nil }
+            let actions = (r["residentialActions"] as? [[String: Any]] ?? []).compactMap(Self.sceneAction)
+            return Activity(id: id,
+                            residenceId: Self.idString(r["residenceId"]) ?? residenceId,
+                            name: (r["name"] as? String) ?? "Scene \(id)",
+                            icon: (r["customIcon"] as? String) ?? "",
+                            actions: actions)
+        }
+    }
+
+    /// Run a scene the way the web app does: no body, the id in the query. The reply carries
+    /// no device state, so the caller paints the actions' targets itself.
+    func executeActivity(_ s: Keychain.Session, id: String) async throws {
+        _ = try await request("POST", "ResidentialActivities/execute", query: ["id": id], token: s.token, body: [:])
+    }
+
     func device(_ s: Keychain.Session, id: String) async throws -> Device {
         let j = try await object("IotSwitches/\(id)", s)
         guard let d = Self.device(from: j, residenceId: Self.idString(j["residenceId"]) ?? "") else { throw Error.malformed("IotSwitch") }
@@ -211,9 +239,18 @@ final class LevitonClient: Sendable {
         return DeviceFields(json: d)
     }
 
-    /// Any GET, parsed but otherwise untouched (`--get`).
+    /// Any GET, parsed but otherwise untouched (`--get`). A `?a=b&c=d` tail is split off and
+    /// sent as query items, so LoopBack `filter={...}` calls can be poked at from the CLI.
     func rawGet(_ s: Keychain.Session, _ path: String) async throws -> Any {
-        try await request("GET", path, token: s.token)
+        let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        var query: [String: String] = [:]
+        if parts.count == 2 {
+            for pair in parts[1].split(separator: "&") {
+                let kv = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                query[String(kv[0])] = kv.count == 2 ? String(kv[1]) : ""
+            }
+        }
+        return try await request("GET", String(parts[0]), query: query, token: s.token)
     }
 
     /// Any PUT with a JSON object body (`--put`) — for the record fields the app has no
@@ -250,6 +287,30 @@ final class LevitonClient: Sendable {
                       connected: f.connected ?? true,
                       includeInRoomOnOff: (j["includeInRoomOnOff"] as? Bool) ?? false,
                       presetLevel: j["presetLevel"] as? Int)
+    }
+
+    /// One `residentialAction` row. Two shapes live side by side on the same account:
+    /// `targetProperty: "properties"` with `targetValue` a *JSON string* (`"{\"power\":\"ON\",
+    /// \"brightness\":40}"` — a string, so it needs a second parse), or a bare property name
+    /// (`targetProperty: "power"`, `targetValue: "ON"`). Only IotSwitch targets are handled.
+    static func sceneAction(from j: [String: Any]) -> SceneAction? {
+        guard (j["targetModelName"] as? String) == "IotSwitch",
+              let deviceId = idString(j["targetModelId"]) else { return nil }
+        let property = (j["targetProperty"] as? String) ?? ""
+        let raw = j["targetValue"]
+
+        if property == "properties" {
+            guard let text = raw as? String,
+                  let data = text.data(using: .utf8),
+                  let d = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+            return SceneAction(deviceId: deviceId, fields: DeviceFields(json: d))
+        }
+        // A single property, its value unwrapped: {"power": "ON"} / {"brightness": 40}.
+        var one: [String: Any] = [:]
+        if let s = raw as? String, property == "brightness", let n = Int(s) { one[property] = n }
+        else if let v = raw { one[property] = v }
+        let fields = DeviceFields(json: one)
+        return fields == DeviceFields() ? nil : SceneAction(deviceId: deviceId, fields: fields)
     }
 
     /// Ids arrive as integers (occasionally strings); normalise to a string.

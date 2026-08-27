@@ -198,6 +198,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(viewItem(all))
         allRow = all
         updateAllRow()
+        addScenes()
 
         let several = store.residences.count > 1
         var first = false
@@ -235,6 +236,39 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 for d in rest { addDevice(d, indent: 18) }
             }
         }
+    }
+
+    /// The scenes ("Activities" in My Leviton), in their own section under All Devices —
+    /// they are whole-home like it, and they are actions rather than state, so they get no
+    /// dot and no tally. Clicking one keeps the menu open and the affected device rows change
+    /// underneath. Scenes from every residence share the section; the tooltip names which.
+    private func addScenes() {
+        let scenes = store.activities
+        guard !scenes.isEmpty else { return }
+        menu.addItem(.separator())
+        let several = store.residences.count > 1
+        for a in scenes {
+            let row = TextRow { [weak self] in self?.store.runActivity(a.id) }
+            row.set(a.name)
+            row.toolTip = sceneTooltip(a, naming: several)
+            menu.addItem(viewItem(row))
+        }
+    }
+
+    /// "Click to run this My Leviton Activity: Lounge → 40%, 760 Fridge → off, …" — an
+    /// activity has no state, so what it *does* is the only thing worth showing about it.
+    private func sceneTooltip(_ a: Activity, naming residence: Bool) -> String {
+        let names = Dictionary(store.devices.map { ($0.id, $0.name) }, uniquingKeysWith: { x, _ in x })
+        let parts = a.actions.map { action -> String in
+            let name = names[action.deviceId] ?? "device \(action.deviceId)"
+            if action.fields.power == false { return "\(name) → off" }
+            if let b = action.fields.brightness { return "\(name) → \(b)%" }
+            return "\(name) → on"
+        }
+        var tip = "Click to run this My Leviton Activity"
+        if residence, let r = store.residences.first(where: { $0.id == a.residenceId }) { tip += " in \(r.name)" }
+        tip += parts.isEmpty ? ".\nIt has no devices in it." : ":\n" + parts.joined(separator: "\n")
+        return tip
     }
 
     private func addDevice(_ d: Device, indent: CGFloat) {
