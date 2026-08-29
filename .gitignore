@@ -9,3 +9,5 @@ DerivedData/
 .vscode/
 .leviton
 .leviton-session.json
+docs/spikes/**/*.pdf
+.claude/
