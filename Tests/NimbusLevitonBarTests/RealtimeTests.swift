@@ -293,23 +293,22 @@ final class RealtimeTests: XCTestCase {
 
     // MARK: Auth close — and what actually happens
 
-    /// **The auth backoff is unreachable through URLSession, and this pins the behaviour we
-    /// actually have.** `handleDrop(authFailure:)` is only ever told `true` from
-    /// `didCloseWith`, and URLSession delivers that *after* it has already failed the pending
-    /// `receive` (proved by `testURLSessionDeliversTheCloseCodeOnlyAfterTheReceiveFails`
-    /// below). The receive failure gets to `handleDrop` first, tears the task down, and the
-    /// close then finds `webSocketTask !== self.task` and is dropped on the floor. So a 1008 —
-    /// with or without an "unauthorized" reason, since the reason is read in the same
-    /// shadowed method — takes the ordinary 1 s backoff, not `authBackoff`.
+    /// **An auth close takes `authBackoff`, not the ordinary 1 s.** The delegate's
+    /// `didCloseWith` cannot be the carrier — URLSession delivers it *after* failing the
+    /// pending `receive` (proved by `testURLSessionDeliversTheCloseCodeOnlyAfterTheReceiveFails`
+    /// below), by which point `handleDrop` has torn the task down and the callback is
+    /// discarded by its own identity guard. The fix reads `closeCode`/`closeReason` off the
+    /// task itself inside `handleDrop`; before it, a 1008 took the ordinary backoff and a dead
+    /// token re-sent its frame every ≤60 s.
     ///
-    /// `authBackoff` is set to 30 s here precisely so the two are impossible to confuse: if the
-    /// auth path were taken, nothing would reconnect for half a minute.
-    func testAuthCloseTakesTheOrdinaryBackoff() async throws {
+    /// `authBackoff` is 2 s here: long enough to prove the 1 s path was not taken, short
+    /// enough to watch the reconnect actually happen.
+    func testAuthCloseTakesTheAuthBackoff() async throws {
         let server = try startedServer()
         defer { server.stop() }
         let rec = Recorder()
         let rt = realtime(server, recorder: rec)
-        rt.authBackoff = 30
+        rt.authBackoff = 2
         defer { rt.stop() }
 
         try await handshake(rt, server, subscribes: 1)
@@ -317,13 +316,31 @@ final class RealtimeTests: XCTestCase {
 
         await waitUntil("the drop") { rec.liveEvents == [true, false] }
         await waitUntil("the reconnect to be scheduled") { !rec.reconnectLines.isEmpty }
-        XCTAssertEqual(rec.reconnectLines, ["reconnecting in 1 s"],
-                       "1008 now reaches the auth backoff — the docs' claim came true; update this test")
-        XCTAssertTrue(rec.log.contains { $0.hasPrefix("receive failed") },
-                      "the drop no longer arrives as a receive failure: \(rec.log)")
-        XCTAssertFalse(rec.log.contains { $0.hasPrefix("closed ") },
-                       "`didCloseWith` reached the handler this time: \(rec.log)")
-        await waitUntil("the ordinary reconnect", timeout: 3) { server.connectionCount == 2 }
+        XCTAssertEqual(rec.reconnectLines, ["reconnecting in 2 s"],
+                       "a 1008 close must take the auth backoff, not the ordinary 1 s")
+        // Well past the ordinary 1 s backoff: still only the original connection.
+        try await Task.sleep(nanoseconds: 1_200_000_000)
+        XCTAssertEqual(server.connectionCount, 1, "it reconnected on the ordinary backoff")
+        await waitUntil("the auth-backoff reconnect", timeout: 3) { server.connectionCount == 2 }
+    }
+
+    /// The reason-string path: a close that is not 1008 but says "unauthorized" is an auth
+    /// rejection too (the production regex matches unauth|forbidden|401|403).
+    func testUnauthorizedReasonAloneTakesTheAuthBackoff() async throws {
+        let server = try startedServer()
+        defer { server.stop() }
+        let rec = Recorder()
+        let rt = realtime(server, recorder: rec)
+        rt.authBackoff = 2
+        defer { rt.stop() }
+
+        try await handshake(rt, server, subscribes: 1)
+        server.closeNewest(code: .protocolCode(.goingAway), reason: "401 unauthorized")
+
+        await waitUntil("the drop") { rec.liveEvents == [true, false] }
+        await waitUntil("the reconnect to be scheduled") { !rec.reconnectLines.isEmpty }
+        XCTAssertEqual(rec.reconnectLines, ["reconnecting in 2 s"],
+                       "an \"unauthorized\" close reason must take the auth backoff")
     }
 
     /// The evidence for the test above, with no `LevitonRealtime` in the picture: the server's

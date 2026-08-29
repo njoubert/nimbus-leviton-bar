@@ -115,15 +115,15 @@ queue, which `DeviceStore` enters with `MainActor.assumeIsolated`. `LevitonClien
                                               shapes this code assumes? Exit 1 on drift.
 ```
 
-**`swift test` is the correctness check** (2026-08-29; `docs/report/2026-08-29-test-campaign.md`
-says what is covered and why the rest isn't): ~240 tests, no network beyond localhost, no
-Keychain, no device writes — `LevitonClient` runs against a `URLProtocol` stub,
-`LevitonRealtime` against a `Network.framework` websocket server in the test bundle, and
-`DeviceStore` takes injected client/credentials (the `CredentialStore` protocol; tests use an
-in-memory fake — **never construct a `DeviceStore` in a test without one**, or it will touch
-the real Keychain and open a real socket). The seams are default-parameter injection only; the
-app's wiring is unchanged. `--print` and `--watch` remain the live checks, and `--probe` is
-the drift tripwire for the undocumented API — run it after anything server-side looks odd.
+**`swift test` is the correctness check** — ~245 tests, no network beyond localhost, no
+Keychain, no device writes. **`TESTING.md` is the contract: read it before writing or
+touching a test.** The two rules that cannot wait until then: never construct a bare
+`DeviceStore()` in a test (the defaults are the real Keychain and a real socket — inject a
+`FakeCredentialStore` and set `realtimeFactory` first), and nothing in the suite may talk to
+my.leviton.com. `--print` and `--watch` remain the live checks, and `--probe` is the
+read-only drift tripwire for the undocumented API — run it after anything server-side looks
+odd. `docs/report/2026-08-29-test-campaign.md` records the campaign that built all this and
+what it found.
 The CLI and the app share the Keychain items, so once either has signed in the other works.
 
 **A non-interactive shell cannot read the Keychain, and the CLI has a way round it.** An agent,

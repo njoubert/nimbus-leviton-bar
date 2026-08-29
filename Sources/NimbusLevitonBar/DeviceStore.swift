@@ -54,6 +54,13 @@ final class DeviceStore {
     /// is still going, and the first one finishing must not drop the guard for the second.
     private var inFlight: [String: Int] = [:]
     static let reloginCooldown: TimeInterval = 600
+    /// Latched by `stop()`. The delayed refresh a room toggle or a scene run schedules
+    /// (1.5 s after its POST), or a refresh already in flight, used to land after `stop()`
+    /// and reopen the websocket via `startRealtime()` — with the poll left dead, so the
+    /// outgoing copy of the app held a socket to my.leviton.com while its replacement
+    /// started. Cleared only by `start()` and `signIn`: someone deliberately using this
+    /// copy again.
+    private var stopped = false
     private var pollTimer: Timer?
     private var refreshTask: Task<Void, Never>?
     private var realtime: LevitonRealtime?
@@ -113,6 +120,7 @@ final class DeviceStore {
     /// Pick up the saved session or password from the Keychain. Returns false when there is
     /// nothing saved and the caller should ask the user to sign in.
     func start() -> Bool {
+        stopped = false
         let login = credentials.loadLogin()
         email = login?.email
         let saved = credentials.loadSession()
@@ -142,6 +150,7 @@ final class DeviceStore {
     private(set) var awaitingCode: Keychain.Login?
 
     func signIn(_ login: Keychain.Login, code: String? = nil, remember: Bool = true) {
+        stopped = false   // an explicit sign-in un-latches a stopped store
         Diagnostics.shared.record(.app, "signing in as \(login.email)\(code != nil ? " with a two-factor code" : "")")
         state = .signingIn
         email = login.email
@@ -192,7 +201,7 @@ final class DeviceStore {
     /// Reload everything (residences and devices). Coalesces: a refresh already in flight is
     /// left to finish rather than doubled up.
     func refresh() {
-        guard let s = session, refreshTask == nil else { return }
+        guard !stopped, let s = session, refreshTask == nil else { return }
         refreshTask = Task {
             defer { refreshTask = nil }
             do {
@@ -260,6 +269,10 @@ final class DeviceStore {
     /// A token was rejected. Replay the saved password once per cooldown; otherwise give up
     /// on this session and say so — the next poll tries again later.
     private func handleUnauthorized() {
+        // Mid-shutdown a 401 must change nothing: the incoming copy is about to load the
+        // saved session and decide for itself, and this copy must not delete it or spend the
+        // one-per-cooldown login replay on its way out.
+        guard !stopped else { return }
         credentials.deleteSession()
         session = nil
         Diagnostics.shared.setSession(nil)
@@ -327,9 +340,14 @@ final class DeviceStore {
         refresh()
     }
 
-    /// Put the store to sleep: no poll, no socket. Called before an update swaps the app out
-    /// from under us, so the outgoing copy is not still talking while the new one starts.
-    func stop() { stopPolling() }
+    /// Put the store to sleep: no poll, no socket — and none later either. Called before an
+    /// update swaps the app out from under us, so the outgoing copy is not still talking while
+    /// the new one starts. Sticky on purpose (see `stopped`); a plain `stopPolling()` here
+    /// left the delayed room/scene refresh free to reopen the socket.
+    func stop() {
+        stopped = true
+        stopPolling()
+    }
 
     private func startPolling() {
         stopPolling()
@@ -350,7 +368,9 @@ final class DeviceStore {
     }
 
     private func startRealtime() {
-        guard let s = session, let rt = realtimeFactory(s, devices.map(\.id)) else { return }
+        // The `stopped` check closes the in-flight window: a refresh that was already running
+        // when `stop()` landed still finishes, and its tail must not build a socket.
+        guard !stopped, let s = session, let rt = realtimeFactory(s, devices.map(\.id)) else { return }
         rt.onUpdate = { [weak self] id, fields in   // called on the main queue
             MainActor.assumeIsolated { self?.apply(id: id, fields: fields) }
         }

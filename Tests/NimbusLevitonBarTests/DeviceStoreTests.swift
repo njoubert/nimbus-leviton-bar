@@ -584,4 +584,73 @@ final class DeviceStoreTests: XCTestCase {
         XCTAssertEqual(store.summary, "2 of 3 on · 1 offline")
         store.stop()
     }
+
+    // MARK: stop() is sticky
+
+    /// The bug this campaign found: `toggleRoom`/`runActivity` sleep 1.5 s and then
+    /// `refresh()`, and a `stop()` landing in that window — the updater's relaunch is exactly
+    /// that moment — used to let the delayed refresh rebuild the websocket. Now the latch
+    /// holds: after `stop()`, no request goes out and the realtime factory is never asked.
+    func testStopIsStickyAgainstTheDelayedRoomRefresh() async {
+        let (devices, rooms) = alcove()
+        let (store, http, _) = await readyStore(devices: devices, rooms: rooms)
+        var factoryCalls = 0
+        store.realtimeFactory = { _, _ in factoryCalls += 1; return nil }
+        http.stub("POST", "ResidentialRooms/turnOn", .json(200, [:] as [String: Any]))
+
+        store.toggleRoom("1")
+        await waitUntil("the room POST") { http.requests("POST", "ResidentialRooms/turnOn").count == 1 }
+        store.stop()
+        let frozen = http.requests.count
+        // Well past the 1.5 s delayed refresh: nothing else may have gone out.
+        try? await Task.sleep(nanoseconds: 1_800_000_000)
+        XCTAssertEqual(http.requests.count, frozen, "the delayed refresh ran after stop()")
+        XCTAssertEqual(factoryCalls, 0, "stop() must keep the realtime factory unasked")
+        XCTAssertFalse(store.pollActive)
+    }
+
+    /// The other window: a refresh already in flight when `stop()` lands still finishes, but
+    /// its tail must not build a socket.
+    func testStopIsStickyAgainstAnInFlightRefresh() async {
+        let (store, http, _) = await readyStore(
+            devices: [Fixtures.iotSwitch(id: 5, name: "Desk")])
+        var factoryCalls = 0
+        store.realtimeFactory = { _, _ in factoryCalls += 1; return nil }
+        // The delayed reply must be stubbed *before* stubHome's, or the FIFO serves the
+        // immediate one and the refresh is over before stop() can land in its window.
+        http.reset()
+        http.stub("GET", "Residences/100/iotSwitches",
+                  .delayed(0.5, 200, [Fixtures.iotSwitch(id: 5, name: "Desk", power: "ON")]))
+        stubHome(http, devices: [Fixtures.iotSwitch(id: 5, name: "Desk", power: "ON")])
+
+        store.refresh()
+        await waitUntil("the fetch to be in flight") {
+            http.requests("GET", "Residences/100/iotSwitches").count >= 1
+        }
+        store.stop()
+        // Let the delayed reply land and the refresh run to completion.
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        XCTAssertEqual(factoryCalls, 0, "the in-flight refresh's tail built a socket after stop()")
+    }
+
+    /// The latch is not a grave: an explicit sign-in — a person deliberately using this copy —
+    /// brings the store back, polling, socket factory and all.
+    func testSignInRevivesAStoppedStore() async {
+        let (store, http, _) = await readyStore(
+            devices: [Fixtures.iotSwitch(id: 5, name: "Desk")])
+        store.stop()
+        let frozen = http.requests.count
+        store.refresh()
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(http.requests.count, frozen, "refresh() must be dead after stop()")
+
+        var factoryCalls = 0
+        store.realtimeFactory = { _, _ in factoryCalls += 1; return nil }
+        http.stub("POST", "Person/login", .json(200, Fixtures.loginReply()))
+        store.signIn(Fixtures.login(), remember: false)
+        await waitUntil("the revived store") { store.state == .ready }
+        XCTAssertTrue(store.pollActive)
+        XCTAssertEqual(factoryCalls, 1, "the revived store should have asked for a feed again")
+        store.stop()
+    }
 }

@@ -205,6 +205,14 @@ SIGN_IDENTITY="Developer ID Application: Niels Joubert (TEAMID)"
 NOTARY_PROFILE=<profile>      # the name you gave: xcrun notarytool store-credentials <profile> --apple-id … --team-id … --password …
 ```
 
+## Testing
+
+`swift test` runs the whole suite (~245 tests, ~20 seconds) with no credentials and no
+network beyond localhost — nothing in it can touch your lights, your Keychain, or your
+My Leviton account. `TESTING.md` has the map, the harness, and the rules; it also documents
+`--probe`, a read-only check that my.leviton.com still answers in the shapes this app
+assumes.
+
 ## Licence
 
 GPL-3.0-or-later. Not affiliated with Leviton; My Leviton is theirs.

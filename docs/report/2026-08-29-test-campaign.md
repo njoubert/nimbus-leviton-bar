@@ -56,16 +56,23 @@ Reproduce: `swift test`; coverage with `--enable-code-coverage` then
 - New feature: **`--probe`** (`Probe.swift` + a switch case in CLI/main) — the read-only
   compatibility probe for the undocumented API, below.
 
-## Real bugs found (not fixed — flagged for a decision)
+## Real bugs found — both since fixed (same day, follow-up commit)
+
+Found by the campaign, fixed once the owner asked. The descriptions below are the findings as
+made; each now carries its fix.
 
 1. **`DeviceStore.stop()` is not sticky.** `toggleRoom` and `runActivity` end their success
    path with `sleep 1.5 s; refresh()` in a Task that strongly holds the store. `stop()`'s
    documented job is to quiesce the app before the updater swaps it out — but a stop landing
    in that window doesn't cancel the delayed refresh, whose tail calls `startRealtime()`. Net:
    tap a room/scene, an update relaunches within 1.5 s, and the *outgoing* copy opens a fresh
-   websocket. The poll stays dead (nothing restarts it), so it is socket-only. Fix shape: a
-   `stopped` flag consulted by `refresh()`, or cancel the delayed Tasks in `stop()`.
-   (`DeviceStore.swift` — the two sleeps and the `else { startRealtime() }` tail.)
+   websocket. The poll stays dead (nothing restarts it), so it is socket-only.
+   **Fixed:** `stop()` now latches a `stopped` flag consulted by `refresh()`,
+   `startRealtime()` (closing the in-flight-refresh window too) and `handleUnauthorized()`
+   (a 401 mid-shutdown must not delete the session the incoming copy is about to load, nor
+   spend the login replay); `start()` and an explicit `signIn` un-latch. Three regression
+   tests in DeviceStoreTests: the delayed-room-refresh window, the in-flight-refresh window,
+   and the sign-in revival.
 
 2. **The hour-long auth backoff is unreachable.** URLSession fails the pending `receive`
    *before* delivering `didCloseWith`; the receive failure reaches `handleDrop` first,
@@ -76,10 +83,14 @@ Reproduce: `swift test`; coverage with `--enable-code-coverage` then
    1→2→…→60 s backoff, not the documented hour. It never *logs in* (the REST side owns that,
    with its own cooldown), so the lockout risk CLAUDE.md worries about is not in play — but a
    dead token means a token frame to my.leviton.com every ≤60 s until the next successful
-   re-login replaces it. Fix shape: stash the close code/reason on the delegate callback and
-   let `handleDrop` consult it, instead of gating on task identity.
-   (`LevitonRealtime.swift` — `didCloseWith` vs `handleDrop`; CLAUDE.md's "backs off an hour"
-   bullet and the class doc comment are wrong in practice.)
+   re-login replaces it.
+   **Fixed:** `handleDrop` now reads `closeCode`/`closeReason` off the task itself — verified
+   populated by the time the aborted `receive` lands there, which is earlier than the delegate
+   callback ever arrives — and routes 1008 or an unauth-flavoured reason to `authBackoff`.
+   The pinning test flipped to assert the hour-class path (both the close-code and the
+   reason-regex routes), and the bare-delegate ordering test stays as the documentation of
+   *why* the delegate callback could never carry this. CLAUDE.md's "backs off an hour" claim
+   is true again.
 
 ## Latent traps pinned by tests (no action needed, but know they exist)
 

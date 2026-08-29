@@ -189,10 +189,21 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
         // fail, and each of those failures lands here: an aborted `sendPing` completion, the
         // pending `receive`. Without this guard a single drop scheduled three reconnects and
         // trebled the backoff (1 s → 8 s instead of 1 s → 2 s).
-        guard task != nil else { return }
+        guard let t = task else { return }
+        // `didCloseWith` would say whether this was an auth rejection, but URLSession delivers
+        // it only *after* failing the pending `receive` — which lands here first, tears down,
+        // and leaves that callback to be discarded by its own task-identity guard. By then the
+        // close frame's code and reason are already recorded on the task itself, so read them
+        // here. Without this the hour-long auth backoff was unreachable and a dead token
+        // re-sent its frame every ≤60 s (found by RealtimeTests against a local server,
+        // 2026-08-29; `testURLSessionDeliversTheCloseCodeOnlyAfterTheReceiveFails` pins the
+        // delivery order that makes it necessary).
+        let reason = t.closeReason.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let auth = authFailure || t.closeCode == .policyViolation
+            || reason.range(of: "unauth|forbidden|401|403", options: .regularExpression) != nil
         Diagnostics.shared.feed { $0.drops += 1 }
         teardown()
-        if authFailure {
+        if auth {
             reconnect(after: authBackoff)
         } else {
             reconnect(after: backoff)
