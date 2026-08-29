@@ -12,6 +12,9 @@ struct Device: Identifiable, Equatable {
     var roomId: String?      // residentialRoomId; nil when My Leviton has it in no room
     var name: String
     var model: String        // e.g. DW6HD, D26HD, DW15S, DW4SF, DW15P
+    /// Firmware, as the record reports it: "1.0.15", or "1.7.1; CP 1.13" where the radio
+    /// co-processor carries its own. Shown in the menu while ⌥ is held; "" if it is missing.
+    var version: String
     var serial: String
     var power: Bool
     /// 0–100; only meaningful when `canSetLevel` (dimmers and fan controllers).

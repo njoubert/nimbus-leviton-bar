@@ -68,7 +68,8 @@ Sources/NimbusLevitonBar/
   Diagnostics.swift       the flight recorder: REST, websocket frames, app milestones, redacted
   InternalsPanel.swift    the ⌥ Internals window over that buffer, and --dump-internals
   MenuRows.swift          the view-based rows (device / room / text), the shared LevelControl
-                          slider, the hover highlight, and the --dump-menu preview
+                          slider, the hover highlight, the ⌥ model·firmware reveal on a device
+                          row, and the --dump-menu preview
   LoginItem.swift         SMAppService wrapper (identical to net-bar's)
   AppIcon.swift           the icon (a backlit Decora paddle), drawn in code → .icns at bundle time
   DMGBackground.swift     the disk image's background, drawn in code
@@ -99,11 +100,15 @@ queue, which `DeviceStore` enters with `MainActor.assumeIsolated`. `LevitonClien
 .build/debug/NimbusLevitonBar --set NAME on|off|N
 .build/debug/NimbusLevitonBar --room NAME on|off   My Leviton's room switch, before/after listing
 .build/debug/NimbusLevitonBar --watch         realtime frames to stderr (token redacted)
+.build/debug/NimbusLevitonBar --journal PATH  the --watch feed, timestamped to the ms,
+                                              appended to PATH — under nohup it is the
+                                              forensics tripwire (docs/spikes/2026-08-29/)
 .build/debug/NimbusLevitonBar --get PATH      raw GET, pretty-printed (poking at new endpoints)
 .build/debug/NimbusLevitonBar --put PATH JSON raw PUT (record fields the app never writes)
 .build/debug/NimbusLevitonBar --scenes        the Activities and what each one sets
 .build/debug/NimbusLevitonBar --scene NAME    run one Activity
 .build/debug/NimbusLevitonBar --dump-menu P   the rows with sample data → PNG, light and dark
+                                              (the device rows twice: normal, then ⌥ held)
 .build/debug/NimbusLevitonBar --dump-internals P  the Internals panel with sample data → PNG
 .build/debug/NimbusLevitonBar --check-update  the release feed as the updater reads it
 ```
@@ -183,8 +188,14 @@ update) apply.
   that 401s (homebridge-leviton issue #6). The client unions both, quietly.
 - **Devices:** `Residences/{id}/iotSwitches` → full IotSwitch records. Fields used: `id`,
   `name`, `power` ("ON"/"OFF"), `brightness` (0–100), `canSetLevel`, `minLevel`/`maxLevel`,
-  `model`, `serial`, `connected`, `residenceId`, `deleted`. `canSetLevel`, not the model,
-  decides whether a slider is shown. Ids are JSON integers; the code carries them as strings.
+  `model`, `version`, `serial`, `connected`, `residenceId`, `deleted`. `canSetLevel`, not the
+  model, decides whether a slider is shown. Ids are JSON integers; the code carries them as
+  strings. `version` is the firmware — "1.0.15" on the D36HDs, "1.7.1; CP 1.13" on the DW3HLs
+  (two numbers, the radio co-processor's after the semicolon; Bookcase reads `CP 99.99`), so
+  it is a free-form string, not a version to parse. It rides along on the device list, is
+  shown by `--print` (`fw=`) and by the ⌥ reveal in the menu, and is *not* in
+  `DeviceFields` — the realtime feed never sends it, and the 60 s poll re-reads the whole
+  record anyway.
 - **Writes:** `PUT /api/IotSwitches/{id}` with `{"power":…}` and/or `{"brightness":n}`; the
   reply is the whole record. A toggle sends `power` *only*, so the dimmer's own on-behaviour
   applies (`presetLevel` 0 = last level, else that preset — set in the My Leviton app). Fans
@@ -302,6 +313,19 @@ update) apply.
   open (`.common` mode, or it would not fire during tracking). `--watch` prints `— live —` /
   `— not live —` — the way to see the signal without the UI. Clicking Refresh goes through
   `refreshNow()`, which also reconnects a feed that isn't live.
+- **Forensics: who changed a device.** Two markers, calibrated live 2026-08-29. (1) A
+  realtime `saved` frame from a *public-API* write (the phone app, this app, a scene
+  execute) carries the writer's `client_id` in `data`. **An Alexa command carries none by
+  either path** — the skill writes through an internal Leviton channel (verified with a
+  voice-commanded ON of a non-Matter DW15P), and Matter is local — and neither does the
+  device's own report. (2) `IotSwitch.chgReason`, trusted only when freshly re-reported
+  (`lastUpdated` matches the change): 3 = remote command (a cloud PUT sets it — and the
+  PUT's *echo* still shows the old value, the same echo-lies trap as `presetLevel`),
+  1 = local paddle (inferred, not yet provoked), 6 = OTA/reboot. All seven D36HDs
+  (enrolled 2026-08-22..24) sit on an Amazon **Matter** fabric (`matterFabric` vendor
+  4631; firmware 1.0.0 misreported it as vendor 0 until the 1.0.15 update), so an Echo can
+  command them without my.leviton.com seeing a write. The decoder table, the tripwire
+  runbook and the open investigation live in `docs/spikes/2026-08-29/lights-forensics.md`.
 
 ## What happens when My Leviton misbehaves (DeviceStore)
 
@@ -371,6 +395,20 @@ websocket frame, and the app's own milestones. It exists because the alternative
   `keyEquivalentModifierMask = []` so its own default (`.command`) doesn't muddy the match.
   AppKit then swaps them live while the menu is open, which deciding at build time (reading
   `NSEvent.modifierFlags` in `menuNeedsUpdate`) would not.
+- **⌥ over a *view-based* row is polled, not an alternate item.** `NSMenuItem.isAlternate`
+  swaps plain items only, and a local `flagsChanged` monitor
+  (`NSEvent.addLocalMonitorForEvents`) is not called while a menu is tracking — the menu's own
+  loop does not route events through `NSApplication.sendEvent`. So `StatusBarController` reads
+  `NSEvent.modifierFlags` (current hardware state, no event needed) from a 0.1 s timer added
+  in **`.common`** mode, the same reason as the Refresh row's age timer, and only while the
+  menu is open. Three things this has to get right: the menu can be *opened* with ⌥ already
+  down, so `menuWillOpen` reads the flags once itself — and it runs *after* `menuNeedsUpdate`
+  built the rows, so it applies the state to them; `menuDidClose` clears it, or the next open
+  starts in the revealed state with `optionDown` still true and nothing to change it; and
+  `addDevice` seeds each new row from `optionDown` in case AppKit rebuilds under a held key.
+  `DeviceRow.showsDetail` then swaps **one** constraint (what the name gives way to) and two
+  `isHidden` flags — the model label is pinned over the slider's own place, so neither view
+  ever has an ambiguous frame and nothing about the menu's structure changes while it is open.
 - **A wrapping `NSTextField` in an autolayout column will eat the window's spare height.** The
   Internals header, pinned above a stack of controls above a split view, took ~250 pt of slack
   and left the split view a sliver — nothing looked broken, the list was simply not there.

@@ -24,6 +24,8 @@ import NimbusUpdater
 //   --print                 list residences and devices as text; exit
 //   --set DEVICE on|off|N   turn a device (name or id) on/off or set its level; exit
 //   --watch                 print realtime updates as they arrive (Ctrl-C to stop)
+//   --journal PATH          the --watch feed, timestamped, appended to PATH (run it under
+//                           nohup and it is the "who turned that light on" tripwire)
 //   --get PATH              raw GET of an API path (e.g. Residences/1/residentialRooms), pretty-printed
 //   --scenes                the residence's My Leviton Activities and what each one sets
 //   --scene NAME            run one Activity (ResidentialActivities/execute)
@@ -33,7 +35,8 @@ func usage() -> Never {
     usage: NimbusLevitonBar [--enable-login-item | --disable-login-item | --login-item-status]
                             [--render-icon PATH [--size PX]] [--render-iconset DIR]
                             [--render-social PATH]
-                            [--login EMAIL | --logout | --print | --set DEVICE on|off|N | --watch]
+                            [--login EMAIL | --logout | --print | --set DEVICE on|off|N]
+                            [--watch | --journal PATH]
                             [--room ROOM on|off | --get PATH | --put PATH JSON]
                             [--scenes | --scene NAME]
                             [--dump-menu PATH | --dump-internals PATH]
@@ -93,6 +96,7 @@ while !args.isEmpty {
     case "--logout": cli = .logout
     case "--print": cli = .print
     case "--watch": cli = .watch
+    case "--journal": cli = .journal(path: takeValue(a))
     case "--get": cli = .get(path: takeValue(a))
     case "--check-update": cli = .checkUpdate
     case "--preflight": cli = .preflight(app: takeValue(a))

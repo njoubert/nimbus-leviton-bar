@@ -59,6 +59,11 @@ so a room of dim lights with one bright one in it doesn't read as bright, and a 
 can't blast the room — and a lighter band carries on from the knob to the highest, so you can
 still see how far up the rest of the room goes. 0 switches them all off.
 
+**Hold ⌥** with the menu open and every device row shows what the device *is* rather than what
+it is at: its model and firmware, `D36HD · 1.0.15`, in place of the slider and the level. Let
+go and the sliders are back. (⌥ over the version line at the bottom is a different thing —
+that one is **Internals**, below.)
+
 **Scenes** sit in their own section under All Devices — what the My Leviton app calls
 **Activities**: a saved set of devices and levels ("Evening Glow", "Good Morning"). Click one
 and it runs, exactly as the app or a Leviton button would run it; hover it to see what it

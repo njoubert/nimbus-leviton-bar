@@ -230,62 +230,100 @@ final class LevelControl: NSView {
 /// switched on with it). As in the My Leviton app, an off dimmer reads 0 % with the slider
 /// at the bottom, and dragging it to 0 turns the dimmer off; dragging above 0 turns it on at
 /// that level (no lower than its minLevel).
+///
+/// Holding ⌥ swaps the right-hand side for `D36HD · 1.0.15` — the model and its firmware
+/// (`showsDetail`, driven by `StatusBarController` while the menu is open). Every device row
+/// has it, dimmer or not; nothing else in the menu changes.
 @MainActor
 final class DeviceRow: MenuRow {
     var device: Device { didSet { if !(level?.dragging ?? false) { sync() } } }
+    /// ⌥ is down: the level UI gives way to the model and firmware line.
+    var showsDetail = false { didSet { guard showsDetail != oldValue else { return }; applyDetail() } }
     private let dot = NSImageView()
     private let name = MenuRow.label()
+    /// Sits exactly where the slider does — it is only ever visible while the slider is not,
+    /// so they can share the space without a constraint between them.
+    private let info = MenuRow.label(NSFont.smallSystemFontSize, mono: true)
     private var level: LevelControl?
+    /// The one constraint that differs between the two states: what the name gives way to.
+    private var nameToLevel: NSLayoutConstraint!
+    private var nameToInfo: NSLayoutConstraint!
 
     init(device: Device, indent: CGFloat, toggle: @escaping () -> Void, setLevel: @escaping (Int) -> Void) {
         self.device = device
         super.init()
         onClick = toggle
         dot.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(dot); addSubview(name)
+        info.alignment = .right
+        info.isHidden = true
+        addSubview(dot); addSubview(name); addSubview(info)
+        nameToInfo = name.trailingAnchor.constraint(lessThanOrEqualTo: info.leadingAnchor, constant: -8)
         var constraints = [
             dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: MenuRow.textInset + indent),
             dot.centerYAnchor.constraint(equalTo: centerYAnchor),
             dot.widthAnchor.constraint(equalToConstant: 14), dot.heightAnchor.constraint(equalToConstant: 14),
             name.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 6),
             name.centerYAnchor.constraint(equalTo: centerYAnchor),
+            info.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -MenuRow.textInset),
+            info.centerYAnchor.constraint(equalTo: centerYAnchor),
         ]
         if device.canSetLevel {
             let l = LevelControl(maxLevel: device.maxLevel)
             l.minLevel = device.minLevel
-            l.onCommit = setLevel
+            // A reveal asked for mid-drag waits for the release, as a device update does.
+            l.onCommit = { [weak self] v in setLevel(v); self?.applyDetail() }
             addSubview(l)
             level = l
+            nameToLevel = name.trailingAnchor.constraint(lessThanOrEqualTo: l.leadingAnchor, constant: -8)
             constraints += [
-                name.trailingAnchor.constraint(lessThanOrEqualTo: l.leadingAnchor, constant: -8),
                 l.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -MenuRow.textInset),
                 l.centerYAnchor.constraint(equalTo: centerYAnchor),
             ]
         } else {
-            constraints.append(name.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -MenuRow.textInset))
+            nameToLevel = name.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -MenuRow.textInset)
         }
+        constraints.append(nameToLevel)
         NSLayoutConstraint.activate(constraints)
         sync()
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
+    private func applyDetail() {
+        // Hiding a slider that is being dragged does not stop the cell's tracking loop — the
+        // level would still be committed on release, from a control that had vanished.
+        guard !(level?.dragging ?? false) else { return }
+        nameToLevel.isActive = !showsDetail
+        nameToInfo.isActive = showsDetail
+        level?.isHidden = showsDetail
+        info.isHidden = !showsDetail
+    }
+
+    /// "D36HD · 1.0.15". Either half can be missing on a record; both missing is a dash rather
+    /// than an empty row, so ⌥ always visibly does something.
+    private var infoText: String {
+        let parts = [device.model, device.version].filter { !$0.isEmpty }
+        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
+    }
+
     private func sync() {
         let d = device
         isEnabled = d.connected
         dot.image = MenuRow.dotImage(!d.connected ? .offline : d.power ? .on : .off)
         name.stringValue = d.connected ? d.name : "\(d.name)  —  offline"
+        info.stringValue = infoText
         if let l = level {
             l.level = d.power ? d.levelClamped : 0
             l.isEnabled = d.connected
         }
-        toolTip = "\(d.model) · \(d.serial)\n"
+        toolTip = "\(infoText) · \(d.serial)\n"
             + (d.connected ? "Click to turn \(d.power ? "off" : "on")" : "Not reachable by My Leviton")
         refreshAppearance()
     }
 
     override func refreshAppearance() {
         name.textColor = textColor
+        info.textColor = secondaryTextColor
         level?.textColor = device.power ? secondaryTextColor : (hovered ? secondaryTextColor : .tertiaryLabelColor)
     }
 }
@@ -426,13 +464,19 @@ final class TextRow: MenuRow {
 @MainActor
 enum MenuRowPreview {
     static func write(to path: String) -> Bool {
-        func device(_ name: String, on: Bool, level: Int = 100, dim: Bool = true, connected: Bool = true) -> Device {
-            Device(id: name, residenceId: "1", roomId: "r", name: name, model: dim ? "DW3HL" : "DW15P", serial: "1000_0000_0000",
+        func device(_ name: String, on: Bool, level: Int = 100, dim: Bool = true, connected: Bool = true,
+                    model: String = "", version: String = "1.7.1; CP 1.13") -> Device {
+            Device(id: name, residenceId: "1", roomId: "r", name: name,
+                   model: model.isEmpty ? (dim ? "DW3HL" : "DW15P") : model, version: version, serial: "1000_0000_0000",
                    power: on, brightness: level, minLevel: 10, maxLevel: 100, canSetLevel: dim, connected: connected, includeInRoomOnOff: true)
         }
-        let devices = [device("Desk", on: true, level: 100), device("Nightstand", on: false, level: 40),
-                       device("Bookcase", on: false, dim: false), device("760 Fridge", on: false, dim: false, connected: false),
-                       device("A very long lamp name that truncates", on: true, level: 73)]
+        // Real models and firmware off this account, the long "; CP" form included — it is the
+        // string the name has to give way to when ⌥ is held.
+        let devices = [device("Desk", on: true, level: 100),
+                       device("Nightstand", on: false, level: 40, model: "D36HD", version: "1.0.15"),
+                       device("Bookcase", on: false, dim: false),
+                       device("760 Fridge", on: false, dim: false, connected: false, model: "D215P", version: "1.6.4"),
+                       device("A very long lamp name that truncates", on: true, level: 73, model: "D26HD", version: "1.7.3")]
         let room = Room(id: "r", name: "Niels' Room", power: true)
 
         var rows: [MenuRow] = []
@@ -453,6 +497,15 @@ enum MenuRowPreview {
         let polled = TextRow {}; polled.set("Refresh", detail: "updated 47 seconds ago")
         let warn = TextRow {}; warn.set("Refresh", detail: "⚠︎ Desk: my.leviton.com timed out", warning: true)
         rows += [all, allBad, scene, status, polled, warn]
+        // The same device rows with ⌥ down: the slider and the percent give way to the model
+        // and firmware, on dimmers and plain switches alike.
+        let held = TextRow {}; held.set("⌥ held", detail: "model · firmware")
+        rows.append(held)
+        for d in devices {
+            let r = DeviceRow(device: d, indent: 18, toggle: {}, setLevel: { _ in })
+            r.showsDetail = true
+            rows.append(r)
+        }
         // Rows stacked top to bottom by frame, as the menu does it.
         let stack = NSView(frame: NSRect(x: 0, y: 0, width: MenuRow.width, height: MenuRow.height * CGFloat(rows.count)))
         for (i, r) in rows.enumerated() {

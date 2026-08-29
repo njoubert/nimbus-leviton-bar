@@ -37,6 +37,9 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
     var onLive: ((Bool) -> Void)?
     /// Log every frame to stderr (`--watch`).
     var verbose = false
+    /// Where the frame log goes instead of stderr (`--journal`): every line `log()` would
+    /// print under `verbose`, token frames already redacted. Called on the realtime queue.
+    var logSink: ((String) -> Void)?
 
     private let session: Keychain.Session
     private var deviceIds: Set<String>
@@ -328,7 +331,7 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
     /// stderr under `--watch`, and — for everything but the frames, which are recorded with
     /// their own summaries — a line in the Internals panel's App stream.
     private func log(_ s: String) {
-        if verbose { fputs("[realtime] \(s)\n", stderr) }
+        if let sink = logSink { sink(s) } else if verbose { fputs("[realtime] \(s)\n", stderr) }
         guard !s.hasPrefix("→"), !s.hasPrefix("←") else { return }
         Diagnostics.shared.record(.app, "feed: \(s)", isError: s.contains("failed") || s.contains("timed out"))
     }

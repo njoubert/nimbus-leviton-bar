@@ -278,6 +278,7 @@ final class LevitonClient: Sendable {
                       roomId: idString(j["residentialRoomId"]),
                       name: f.name ?? "Switch \(id)",
                       model: (j["model"] as? String) ?? "",
+                      version: (j["version"] as? String) ?? "",
                       serial: (j["serial"] as? String) ?? "",
                       power: f.power ?? false,
                       brightness: f.brightness ?? 0,

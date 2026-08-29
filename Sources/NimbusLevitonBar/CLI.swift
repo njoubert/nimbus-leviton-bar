@@ -13,6 +13,7 @@ enum CLI {
         case set(device: String, value: String)
         case room(room: String, value: String)
         case watch
+        case journal(path: String)
         case get(path: String)
         case put(path: String, json: String)
         case checkUpdate
@@ -260,6 +261,30 @@ enum CLI {
                 rt.start()
                 Swift.print("watching \(all.count) devices — Ctrl-C to stop")
                 RunLoop.main.run()
+
+            case .journal(let path):
+                // `--watch`, but timestamped and appended to a file: the unattended tripwire
+                // for "who turned that light on". Runs until killed; append-only, so restarts
+                // (and a `nohup … &`) keep one continuous record.
+                let s = try session(client)
+                let all = try block { () async throws -> [Device] in
+                    var out: [Device] = []
+                    for r in try await client.residences(s) { out += try await client.devices(s, residenceId: r.id) }
+                    return out
+                }
+                let names = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0.name) })
+                guard let journal = LineJournal(path: path) else {
+                    fputs("cannot open \(path) for appending\n", stderr)
+                    return 1
+                }
+                let rt = LevitonRealtime(session: s, deviceIds: all.map(\.id))
+                rt.logSink = { journal.write($0) }                     // frames and feed lifecycle
+                rt.onUpdate = { id, f in journal.write("\(names[id] ?? id): \(f)") }
+                rt.onLive = { journal.write($0 ? "— live —" : "— not live —") }
+                rt.start()
+                journal.write("journal started: \(all.count) devices, pid \(ProcessInfo.processInfo.processIdentifier)")
+                Swift.print("journaling \(all.count) devices to \(path) — Ctrl-C to stop")
+                RunLoop.main.run()
             }
             return 0
         } catch {
@@ -297,7 +322,8 @@ enum CLI {
         // The flag the server ignores on room On/Off — dumped so a change of heart is visible.
         let preset = d.comesOnAtPreset ? " preset=\(d.presetLevel.map(String.init) ?? "?")" : ""
         let room = d.includeInRoomOnOff ? "" : " includeInRoomOnOff=false"
-        return "\(state)\(level.padding(toLength: 15, withPad: " ", startingAt: 0))  \(d.name)  [\(d.kind.rawValue) \(d.model) \(d.serial) id=\(d.id)\(preset)\(room)]"
+        let fw = d.version.isEmpty ? "" : " fw=\(d.version)"
+        return "\(state)\(level.padding(toLength: 15, withPad: " ", startingAt: 0))  \(d.name)  [\(d.kind.rawValue) \(d.model)\(fw) \(d.serial) id=\(d.id)\(preset)\(room)]"
     }
 
     /// Run an async call to completion from synchronous top-level code.
@@ -326,5 +352,33 @@ enum CLI {
 extension Result where Failure == Swift.Error {
     init(catching body: () async throws -> Success) async {
         do { self = .success(try await body()) } catch { self = .failure(error) }
+    }
+}
+
+/// `--journal`'s append-only line log: every line stamped with local time to the
+/// millisecond (the Internals panel's format, so the two logs line up). One `write` per
+/// line under a lock — lines arrive from the realtime queue and the main queue at once,
+/// and interleaved halves would corrupt exactly the record a forensic log exists to keep.
+/// `FileHandle.write` is an unbuffered syscall, so a `kill` loses nothing.
+private final class LineJournal: @unchecked Sendable {
+    private let handle: FileHandle
+    private let lock = NSLock()
+    private let stamp: DateFormatter
+
+    init?(path: String) {
+        if !FileManager.default.fileExists(atPath: path),
+           !FileManager.default.createFile(atPath: path, contents: nil) { return nil }
+        guard let h = FileHandle(forWritingAtPath: path) else { return nil }
+        h.seekToEndOfFile()
+        handle = h
+        stamp = DateFormatter()
+        stamp.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+    }
+
+    func write(_ line: String) {
+        guard let data = (stamp.string(from: Date()) + " " + line + "\n").data(using: .utf8) else { return }
+        lock.lock()
+        handle.write(data)
+        lock.unlock()
     }
 }

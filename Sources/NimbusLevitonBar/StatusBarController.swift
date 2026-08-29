@@ -27,6 +27,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var lastBar: (on: Int, summary: String, signedIn: Bool)?
     private var askingForCode = false
     private var agoTimer: Timer?
+    private var optionTimer: Timer?
+    /// ⌥ held over the open menu: every device row shows its model and firmware instead of
+    /// its level. AppKit's alternate-item trick (the version line below) works on plain items
+    /// only, so this is polled — see `menuWillOpen`.
+    private var optionDown = false { didSet { if optionDown != oldValue { applyOptionState() } } }
     private var versionItem: NSMenuItem?
     /// Built the first time ⌥ + the version line asks for it, and kept: it holds a scroll
     /// position, a filter and a window frame worth returning to.
@@ -102,12 +107,32 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
         RunLoop.main.add(t, forMode: .common)
         agoTimer = t
+
+        // ⌥ over a device row shows what it is (model and firmware) instead of what it is at.
+        // A view-based row can't be an alternate item, and a local event monitor sees nothing
+        // while a menu is tracking, so the flags are read straight off NSEvent — the menu may
+        // also have been opened with ⌥ already down, which is this first read. `.common`, as
+        // above, or the timer would not fire during tracking.
+        optionDown = NSEvent.modifierFlags.contains(.option)
+        applyOptionState()          // the rows were rebuilt a moment ago, in their normal state
+        let o = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.optionDown = NSEvent.modifierFlags.contains(.option) }
+        }
+        RunLoop.main.add(o, forMode: .common)
+        optionTimer = o
     }
     func menuDidClose(_ menu: NSMenu) {
         menuOpen = false
         agoTimer?.invalidate()
         agoTimer = nil
+        optionTimer?.invalidate()
+        optionTimer = nil
+        optionDown = false
         for v in menu.items.compactMap({ $0.view as? MenuRow }) { v.clearHover() }
+    }
+
+    private func applyOptionState() {
+        for r in deviceRows.values { r.showsDetail = optionDown }
     }
 
     private func rebuild() {
@@ -275,6 +300,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let row = DeviceRow(device: d, indent: indent,
                             toggle: { [weak self] in self?.store.toggle(d.id) },
                             setLevel: { [weak self] level in self?.store.setBrightness(d.id, level) })
+        row.showsDetail = optionDown      // a rebuild under a held ⌥ keeps the reveal
         menu.addItem(viewItem(row))
         deviceRows[d.id] = row
     }
