@@ -1,0 +1,9 @@
+Two fixes from the new test suite, and the suite itself.
+
+**Updating no longer leaves the old copy talking.** If a room or scene was tapped in the moment before an auto-update relaunched the app, the outgoing copy could quietly reopen its connection to my.leviton.com and keep it. `stop()` now sticks: once the updater says go, the old copy stays silent.
+
+**A rejected session backs off properly.** When My Leviton rejects the live feed's token, the feed now waits the hour it always meant to before retrying, instead of knocking every minute — the close code that says "auth" arrived a moment too late to be heard, so the hour-long backoff was unreachable. (Signing in again, from the menu or automatically, still reconnects at once.)
+
+Behind the scenes, the repo gains its first test suite — 247 tests that run with no account and no lights (see `TESTING.md`) — and the command line gains **`--probe`**: a read-only check that my.leviton.com still answers in the shapes this app assumes, so drift in an undocumented API is caught deliberately instead of as a mystery bug. Both fixes above were found by the campaign that built the suite.
+
+Signed with a Developer ID and notarized. Requires macOS 15 and Apple silicon.
