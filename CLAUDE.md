@@ -111,10 +111,20 @@ queue, which `DeviceStore` enters with `MainActor.assumeIsolated`. `LevitonClien
                                               (the device rows twice: normal, then ⌥ held)
 .build/debug/NimbusLevitonBar --dump-internals P  the Internals panel with sample data → PNG
 .build/debug/NimbusLevitonBar --check-update  the release feed as the updater reads it
+.build/debug/NimbusLevitonBar --probe         read-only: does the live API still answer in the
+                                              shapes this code assumes? Exit 1 on drift.
 ```
 
-No unit tests; `--print` and `--watch` are the correctness checks. The CLI and the app share
-the Keychain items, so once either has signed in the other works.
+**`swift test` is the correctness check** (2026-08-29; `docs/report/2026-08-29-test-campaign.md`
+says what is covered and why the rest isn't): ~240 tests, no network beyond localhost, no
+Keychain, no device writes — `LevitonClient` runs against a `URLProtocol` stub,
+`LevitonRealtime` against a `Network.framework` websocket server in the test bundle, and
+`DeviceStore` takes injected client/credentials (the `CredentialStore` protocol; tests use an
+in-memory fake — **never construct a `DeviceStore` in a test without one**, or it will touch
+the real Keychain and open a real socket). The seams are default-parameter injection only; the
+app's wiring is unchanged. `--print` and `--watch` remain the live checks, and `--probe` is
+the drift tripwire for the undocumented API — run it after anything server-side looks odd.
+The CLI and the app share the Keychain items, so once either has signed in the other works.
 
 **A non-interactive shell cannot read the Keychain, and the CLI has a way round it.** An agent,
 an ssh session or a cron job gets `errSecInteractionNotAllowed` ("User interaction is not
@@ -235,9 +245,12 @@ update) apply.
   "ON")`, unfiltered. So the flag is dead server-side; the app shows no sign of it (it is
   still parsed and `--print` dumps `includeInRoomOnOff=false` as a tripwire). On 2026-08-22,
   after that test, the owner had all 12 opted-out devices set back to `true`
-  (`--put IotSwitches/{id} '{"includeInRoomOnOff":true}'`, which touches nothing else), so the
-  account now reads all-`true` and re-testing the server's behaviour means setting one `false`
-  first. The room's `power` is "any device on"; the store recomputes it locally from the
+  (`--put IotSwitches/{id} '{"includeInRoomOnOff":true}'`, which touches nothing else) — but
+  by 2026-08-29 `--probe` found **7 of 20 devices reading `false` again** (Cactus, Entrance
+  Track Lights, Living Room Ceiling, Hallway Track Lights, PH Mini, Kitchen Ceiling, +1), so
+  something — the My Leviton app's room editor is the suspect — flips it back; don't assume
+  the all-`true` state holds, and re-testing the server's behaviour no longer needs a setup
+  write. The room's `power` is "any device on"; the store recomputes it locally from the
   devices.
   Timestamps are no help in forensics here: every device's `lastUpdated` bumps on a periodic
   cloud sync (all of them at once), and a redundant PUT bumps it too.

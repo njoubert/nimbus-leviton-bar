@@ -207,7 +207,7 @@ final class LevelControl: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    @objc private func changed() {
+    @objc func changed() {
         // Snap to the nearest step, then the device's own limits: 0 means off, above it the
         // dimmer's floor applies, and maxValue may not be a multiple of the step.
         var v = Int((slider.doubleValue / Double(Self.step)).rounded()) * Self.step
@@ -243,8 +243,8 @@ final class DeviceRow: MenuRow {
     private let name = MenuRow.label()
     /// Sits exactly where the slider does — it is only ever visible while the slider is not,
     /// so they can share the space without a constraint between them.
-    private let info = MenuRow.label(NSFont.smallSystemFontSize, mono: true)
-    private var level: LevelControl?
+    let info = MenuRow.label(NSFont.smallSystemFontSize, mono: true)
+    private(set) var level: LevelControl?
     /// The one constraint that differs between the two states: what the name gives way to.
     private var nameToLevel: NSLayoutConstraint!
     private var nameToInfo: NSLayoutConstraint!
@@ -336,7 +336,7 @@ final class RoomRow: MenuRow {
     private let dot = NSImageView()
     private let name = MenuRow.label(weight: .semibold)
     private let count = MenuRow.label(NSFont.smallSystemFontSize, mono: true)
-    private var level: LevelControl?
+    private(set) var level: LevelControl?
     /// What the slider's band is showing, for the tooltip; nil when every lit dimmer matches.
     private(set) var spread: String?
 

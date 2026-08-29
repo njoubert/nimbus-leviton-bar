@@ -29,6 +29,8 @@ import NimbusUpdater
 //   --get PATH              raw GET of an API path (e.g. Residences/1/residentialRooms), pretty-printed
 //   --scenes                the residence's My Leviton Activities and what each one sets
 //   --scene NAME            run one Activity (ResidentialActivities/execute)
+//   --probe                 read-only check that my.leviton.com still answers in the shapes
+//                           this app assumes; exits 1 on drift
 
 func usage() -> Never {
     print("""
@@ -39,6 +41,7 @@ func usage() -> Never {
                             [--watch | --journal PATH]
                             [--room ROOM on|off | --get PATH | --put PATH JSON]
                             [--scenes | --scene NAME]
+                            [--probe]
                             [--dump-menu PATH | --dump-internals PATH]
                             [--check-update | --preflight APP.app]
     """)
@@ -105,6 +108,7 @@ while !args.isEmpty {
         cli = .put(path: path, json: json)
     case "--scenes": cli = .scenes
     case "--scene": cli = .scene(name: takeValue(a))
+    case "--probe": cli = .probe
     case "--set":
         let device = takeValue(a), value = takeValue(a)
         cli = .set(device: device, value: value)

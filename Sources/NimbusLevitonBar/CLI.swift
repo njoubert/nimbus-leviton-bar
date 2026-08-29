@@ -20,6 +20,7 @@ enum CLI {
         case preflight(app: String)
         case scenes
         case scene(name: String)
+        case probe
     }
 
     static func run(_ cmd: Command) -> Int32 {
@@ -174,6 +175,12 @@ enum CLI {
                 }
                 try block { try await client.executeActivity(s, id: a.id) }
                 Swift.print("ran \(a.name) (\(a.actions.count) actions)")
+
+            case .probe:
+                // Read-only: GETs on the session `session(client)` already has, nothing else.
+                // Exits 1 when the API no longer answers in the shapes the app parses.
+                let s = try session(client)
+                return block { await Probe.run(client: client, session: s) }
 
             case .get(let path):
                 // Raw GET, pretty-printed: for poking at endpoints the app does not use yet.
