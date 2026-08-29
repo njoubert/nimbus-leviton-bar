@@ -1,0 +1,7 @@
+What is that device, exactly?
+
+**Hold ⌥** with the menu open and every device row shows what the device *is* rather than what it is at: its model and firmware, `D36HD · 1.0.15`, in place of the slider and the level. Let go and the sliders are back. Handy when a firmware update is rolling out, or when you're trying to remember which dimmer is the one in the wall. (⌥ over the version line at the bottom is still **Internals**.)
+
+The command line gains **`--journal PATH`**: the realtime feed, timestamped to the millisecond and appended to a file. Where `--watch` is for watching, `--journal` is for leaving running — put it under `nohup` and it becomes a tripwire that records exactly when each device changed and what changed it, evidence for the "who turned that light on?" investigations.
+
+Signed with a Developer ID and notarized. Requires macOS 15 and Apple silicon.
