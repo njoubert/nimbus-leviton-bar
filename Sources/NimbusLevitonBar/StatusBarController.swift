@@ -329,6 +329,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         if let e = store.lastError {
             row.set("Refresh", detail: "⚠︎ \(e)", warning: true)
             row.toolTip = e
+        } else if let drift = store.apiAnomaly {
+            // The drift warning: my.leviton.com is not behaving like the spec the app is
+            // written against (see DeviceStore's anomaly notes). A small ⚠︎ beside the usual
+            // reading, and the tooltip says what and where to look — this is precisely the
+            // moment the Internals panel and --probe exist for.
+            let reading = store.isLive ? "live"
+                : store.lastRefresh.map { "updated \(Self.ago($0))" } ?? "not updated yet"
+            row.set("Refresh", detail: "⚠︎ \(reading)", warning: true)
+            row.toolTip = drift + "\n\n⌥ over the version line opens Internals; "
+                + "`--probe` checks the API's shapes. Clears an hour after the last sign of trouble."
         } else if store.isLive {
             row.set("Refresh", detail: "live")
             row.toolTip = "My Leviton's push feed is connected and answering: switching, dimming "

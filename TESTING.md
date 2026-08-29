@@ -36,8 +36,8 @@ so it costs zero logins while the cache is fresh.
 | DiagnosticsTests | redaction (passwords, tokens, the login reply), ring buffer, frame summaries |
 | DevCredentialsTests | `.leviton` parsing, env-over-file, the 0600 session cache |
 | LevitonClientTests | bare `Authorization`, error mapping, retry-once, the residences union |
-| DeviceStoreTests | the 401 dance, optimistic rollback, the three brightness write shapes, the sticky `stop()` |
-| RealtimeTests | token→challenge→ready→subscribe, one-drop-one-reconnect, pong timeout, the auth backoff |
+| DeviceStoreTests | the 401 dance, optimistic rollback, the three brightness write shapes, the sticky `stop()`, the drift ⚠︎ |
+| RealtimeTests | token→challenge→ready→subscribe, one-drop-one-reconnect, pong timeout, the auth backoff (and its `onAuthBackoff` signal) |
 | ProbeTests | every `--probe` check offline, including its only-GETs invariant |
 | CLISmokeTests | the spawned binary: PNG renderers, usage, exit codes |
 | MenuLogicTests | 5 % detents, room knob-at-minimum + spread band, the ⌥ reveal |

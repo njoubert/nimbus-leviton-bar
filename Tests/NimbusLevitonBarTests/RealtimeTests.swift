@@ -204,6 +204,7 @@ final class RealtimeTests: XCTestCase {
 
         XCTAssertEqual(rec.reconnectLines.count, 1, "one drop scheduled \(rec.reconnectLines)")
         XCTAssertEqual(server.connectionCount, 2)
+        XCTAssertEqual(rec.authBackoffs, 0, "an ordinary drop must not raise the drift warning")
     }
 
     /// `reconnectNow()` skips the wait (a wake, or the Refresh row), and the timer it pre-empted
@@ -318,6 +319,7 @@ final class RealtimeTests: XCTestCase {
         await waitUntil("the reconnect to be scheduled") { !rec.reconnectLines.isEmpty }
         XCTAssertEqual(rec.reconnectLines, ["reconnecting in 2 s"],
                        "a 1008 close must take the auth backoff, not the ordinary 1 s")
+        await waitUntil("onAuthBackoff") { rec.authBackoffs == 1 }   // the drift warning's signal
         // Well past the ordinary 1 s backoff: still only the original connection.
         try await Task.sleep(nanoseconds: 1_200_000_000)
         XCTAssertEqual(server.connectionCount, 1, "it reconnected on the ordinary backoff")
@@ -406,6 +408,7 @@ final class RealtimeTests: XCTestCase {
         let rt = LevitonRealtime(session: Fixtures.session(token: token), deviceIds: ids, url: server.url)
         rt.onLive = { recorder.live($0) }
         rt.onUpdate = { recorder.update($0, $1) }
+        rt.onAuthBackoff = { recorder.authBackoff() }
         rt.logSink = { recorder.log($0) }          // called on the realtime queue — hence the lock
         addTeardownBlock { rt.stop() }
         return rt
@@ -436,8 +439,11 @@ private final class Recorder: @unchecked Sendable {
     private var _live: [Bool] = []
     private var _updates: [(id: String, fields: LevitonClient.DeviceFields)] = []
     private var _log: [String] = []
+    private var _authBackoffs = 0
 
     func live(_ b: Bool) { sync { _live.append(b) } }
+    func authBackoff() { sync { _authBackoffs += 1 } }
+    var authBackoffs: Int { sync { _authBackoffs } }
     func update(_ id: String, _ f: LevitonClient.DeviceFields) { sync { _updates.append((id, f)) } }
     func log(_ s: String) { sync { _log.append(s) } }
 

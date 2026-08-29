@@ -47,6 +47,10 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
     /// auth rejection, `stop()`. The menu says "live" on the strength of this; the REST poll
     /// carries on either way.
     var onLive: ((Bool) -> Void)?
+    /// The feed's session was rejected (close 1008, or an unauthorized-flavoured reason) and
+    /// the feed is now waiting out `authBackoff`. Called on the main queue; the store's drift
+    /// warning is the audience — an ordinary drop never fires this.
+    var onAuthBackoff: (() -> Void)?
     /// Log every frame to stderr (`--watch`).
     var verbose = false
     /// Where the frame log goes instead of stderr (`--journal`): every line `log()` would
@@ -204,6 +208,7 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
         Diagnostics.shared.feed { $0.drops += 1 }
         teardown()
         if auth {
+            DispatchQueue.main.async { self.onAuthBackoff?() }
             reconnect(after: authBackoff)
         } else {
             reconnect(after: backoff)

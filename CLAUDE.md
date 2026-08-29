@@ -326,6 +326,15 @@ update) apply.
   open (`.common` mode, or it would not fire during tracking). `--watch` prints `— live —` /
   `— not live —` — the way to see the signal without the UI. Clicking Refresh goes through
   `refreshNow()`, which also reconnects a feed that isn't live.
+  - **The drift warning: a small ⚠︎ beside the reading** when my.leviton.com stops behaving
+    like the spec this app is written against — three `checkFeedDelivered` trips inside
+    30 min, any `malformed` reply, or the feed's session rejected (the hour backoff, via
+    `LevitonRealtime.onAuthBackoff`). One-off drops and plain 500s deliberately never show
+    it: a warning that cries at routine failures trains its reader to ignore it. The tooltip
+    carries the reason and points at ⌥ Internals and `--probe`; entries age out an hour after
+    the last signal (lazily, on the row's own 1 s tick), and a feed-auth entry clears the
+    moment the feed authenticates again. `DeviceStore.apiAnomaly` is the whole API; the
+    counters are pinned by DeviceStoreTests' drift section.
 - **Forensics: who changed a device.** Two markers, calibrated live 2026-08-29. (1) A
   realtime `saved` frame from a *public-API* write (the phone app, this app, a scene
   execute) carries the writer's `client_id` in `data`. **An Alexa command carries none by

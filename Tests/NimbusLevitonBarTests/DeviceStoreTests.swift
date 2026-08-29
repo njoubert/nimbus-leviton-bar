@@ -585,6 +585,81 @@ final class DeviceStoreTests: XCTestCase {
         store.stop()
     }
 
+    // MARK: The drift warning
+
+    /// One `checkFeedDelivered` trip is a race the design accepts; three inside the window is
+    /// drift, and that is when the Refresh row earns its ⚠︎.
+    func testThreeFeedMissesRaiseTheDriftWarningTwoDoNot() async {
+        let (store, http, _) = await readyStore(
+            devices: [Fixtures.iotSwitch(id: 5, name: "Desk", brightness: 10, canSetLevel: true)])
+        for round in 1...3 {
+            store.overrideLiveForTesting(true)
+            http.reset()
+            stubHome(http, devices: [Fixtures.iotSwitch(id: 5, name: "Desk",
+                                                        brightness: 10 + round, canSetLevel: true)])
+            store.refresh()
+            await waitUntil("miss \(round) to drop the feed") { store.isLive == false }
+            if round < DeviceStore.feedMissThreshold {
+                XCTAssertNil(store.apiAnomaly, "warned after only \(round) miss(es)")
+            }
+        }
+        let drift = store.apiAnomaly
+        XCTAssertNotNil(drift)
+        XCTAssertTrue(drift?.contains("missed 3 changes") == true, drift ?? "nil")
+        store.stop()
+    }
+
+    /// A reply the parser refuses is drift by definition; an ordinary 500 is not.
+    func testMalformedReplyRaisesTheDriftWarningAPlainFailureDoesNot() async {
+        let (store, http, _) = await readyStore(
+            devices: [Fixtures.iotSwitch(id: 5, name: "Desk")])
+        http.reset()
+        stubHome(http, devices: [], permissions: [.json(500, boom)])
+        store.refresh()
+        await waitUntil("the failed refresh") { store.lastError != nil }
+        XCTAssertNil(store.apiAnomaly, "a plain 500 must not raise the drift warning")
+
+        // The malformed reply must be stubbed before stubHome's healthy one — FIFO.
+        http.reset()
+        http.stub("GET", "Residences/100/iotSwitches", .json(200, ["not": "an array"]))
+        stubHome(http, devices: [])
+        store.refresh()
+        await waitUntil("the drift warning") { store.apiAnomaly != nil }
+        XCTAssertTrue(store.apiAnomaly?.contains("could not read") == true, store.apiAnomaly ?? "nil")
+        store.stop()
+    }
+
+    /// Entries age out lazily an hour after the last sign of trouble — no timer, the row's
+    /// read is the clock.
+    func testDriftWarningAgesOut() {
+        let (store, _, _) = makeStore()
+        store.noteAnomaly(.malformed, "old", at: Date().addingTimeInterval(-3700))
+        XCTAssertNil(store.apiAnomaly)
+        store.noteAnomaly(.malformed, "new", at: Date().addingTimeInterval(-3500))
+        XCTAssertEqual(store.apiAnomaly, "new")
+    }
+
+    /// A feed-auth anomaly resolves itself the moment the feed authenticates again (a
+    /// re-login replaced the token); the other kinds only age out.
+    func testFeedAuthAnomalyClearsWhenTheFeedGoesLive() {
+        let (store, _, _) = makeStore()
+        store.noteAnomaly(.feedAuth, "rejected")
+        XCTAssertNotNil(store.apiAnomaly)
+        store.overrideLiveForTesting(true)
+        XCTAssertNil(store.apiAnomaly, "going live must clear a feed-auth anomaly")
+
+        store.noteAnomaly(.malformed, "unreadable")
+        store.overrideLiveForTesting(true)
+        XCTAssertNotNil(store.apiAnomaly, "going live must not clear a malformed anomaly")
+    }
+
+    func testSignOutClearsTheDriftWarning() async {
+        let (store, _, _) = await readyStore(devices: [])
+        store.noteAnomaly(.malformed, "unreadable")
+        store.signOut()
+        XCTAssertNil(store.apiAnomaly)
+    }
+
     // MARK: stop() is sticky
 
     /// The bug this campaign found: `toggleRoom`/`runActivity` sleep 1.5 s and then

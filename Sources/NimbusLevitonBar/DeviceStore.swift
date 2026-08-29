@@ -35,6 +35,65 @@ final class DeviceStore {
     private(set) var lastError: String?
     var onChange: (() -> Void)?
 
+    // MARK: The drift warning
+
+    /// Signals that my.leviton.com is not behaving like the spec this app is written against
+    /// — not routine failures. One-off drops, timeouts and 500s are deliberately NOT here: a
+    /// warning that cries at those trains its reader to ignore it. What qualifies:
+    /// `feedMisses` (the poll caught the feed lying `feedMissThreshold` times inside
+    /// `anomalyWindow` — one trip is a race the design accepts, a change landing mid-fetch),
+    /// `malformed` (the parser refused a reply's shape — the clearest drift signal there is),
+    /// and `feedAuth` (the feed's session rejected, so it is waiting out the hour).
+    ///
+    /// The Refresh row shows a small ⚠︎ beside "live" while `apiAnomaly` is non-nil, with the
+    /// reason in the tooltip pointing at ⌥ Internals and `--probe`. Entries age out lazily
+    /// after `anomalyShownFor` (no timer; the row's own 1 s tick re-reads), and `feedAuth`
+    /// clears the moment the feed authenticates again.
+    enum AnomalyKind { case feedMisses, malformed, feedAuth }
+    private var anomalies: [(at: Date, kind: AnomalyKind, what: String)] = []
+    /// `checkFeedDelivered` trips, for the threshold below.
+    private var feedMisses: [Date] = []
+    static let anomalyWindow: TimeInterval = 1800
+    static let anomalyShownFor: TimeInterval = 3600
+    static let feedMissThreshold = 3
+
+    /// The newest still-current drift reason, or nil when the row should stay plain.
+    var apiAnomaly: String? {
+        let cutoff = Date().addingTimeInterval(-Self.anomalyShownFor)
+        return anomalies.last(where: { $0.at > cutoff })?.what
+    }
+
+    /// Internal, and dated, so the tests can backdate entries to prove the aging.
+    func noteAnomaly(_ kind: AnomalyKind, _ what: String, at: Date = Date()) {
+        anomalies.append((at, kind, what))
+        if anomalies.count > 20 { anomalies.removeFirst(anomalies.count - 20) }
+        Diagnostics.shared.record(.app, "drift: \(what)", isError: true)
+        notify()
+    }
+
+    private func noteFeedMiss() {
+        let cutoff = Date().addingTimeInterval(-Self.anomalyWindow)
+        feedMisses = feedMisses.filter { $0 > cutoff } + [Date()]
+        guard feedMisses.count >= Self.feedMissThreshold else { return }
+        noteAnomaly(.feedMisses, "the feed missed \(feedMisses.count) changes in "
+            + "\(Int(Self.anomalyWindow / 60)) min — my.leviton.com may have drifted")
+    }
+
+    /// A reply the parser refused is drift by definition; everything else stays `lastError`'s
+    /// business.
+    private func noteIfMalformed(_ error: Swift.Error) {
+        if case LevitonClient.Error.malformed(let what) = error {
+            noteAnomaly(.malformed, "my.leviton.com sent a reply the app could not read (\(what))")
+        }
+    }
+
+    /// The one path allowed to write `isLive`: going live clears any feed-auth anomaly — the
+    /// rejection resolved itself (usually a re-login replaced the token).
+    private func setLive(_ live: Bool) {
+        isLive = live
+        if live { anomalies.removeAll { $0.kind == .feedAuth } }
+    }
+
     private let client: LevitonClient
     private let credentials: CredentialStore
     /// Builds the realtime feed when a refresh succeeds. Injectable so the tests can point
@@ -190,6 +249,8 @@ final class DeviceStore {
         stopPolling()
         session = nil
         residences = []
+        anomalies = []
+        feedMisses = []
         credentials.deleteSession()
         credentials.deleteLogin()
         state = .signedOut
@@ -246,6 +307,7 @@ final class DeviceStore {
             } catch {
                 lastError = Self.describe(error)
                 Diagnostics.shared.record(.app, "fetch failed: \(lastError!)", isError: true)
+                noteIfMalformed(error)
                 state = residences.isEmpty ? .error(lastError!) : .ready
                 notify()
             }
@@ -364,7 +426,7 @@ final class DeviceStore {
         pollTimer = nil
         realtime?.stop()
         realtime = nil
-        isLive = false   // the feed's own `false` arrives too late, and `realtime` is gone
+        setLive(false)   // the feed's own `false` arrives too late, and `realtime` is gone
     }
 
     private func startRealtime() {
@@ -379,8 +441,15 @@ final class DeviceStore {
                 // A feed we have already replaced must not report on the current one: its
                 // final `false` can land after the new one is up.
                 guard let self, let rt, self.realtime === rt, self.isLive != live else { return }
-                self.isLive = live
+                self.setLive(live)
                 self.notify()
+            }
+        }
+        rt.onAuthBackoff = { [weak self, weak rt] in   // also the main queue
+            MainActor.assumeIsolated {
+                guard let self, let rt, self.realtime === rt else { return }
+                self.noteAnomaly(.feedAuth, "my.leviton.com rejected the feed's session — "
+                    + "the feed is paused for an hour (the poll carries on)")
             }
         }
         rt.start()
@@ -414,7 +483,8 @@ final class DeviceStore {
                 Diagnostics.shared.record(.app, "the feed missed a change: the fetch found \(d.name) at "
                     + "\(d.power ? "on" : "off") \(d.brightness)% (we held \(old.power ? "on" : "off") "
                     + "\(old.brightness)%) — dropping \"live\" and reconnecting", isError: true)
-                isLive = false
+                setLive(false)
+                noteFeedMiss()
                 realtime?.reconnectNow()
                 return
             }
@@ -482,6 +552,7 @@ final class DeviceStore {
             } catch {
                 if let i = residences.firstIndex(where: { $0.id == before.id }) { residences[i] = before }
                 lastError = "\(room.name): \(Self.describe(error))"
+                noteIfMalformed(error)
                 notify()
                 if case LevitonClient.Error.unauthorized = error { refresh() }
             }
@@ -522,6 +593,7 @@ final class DeviceStore {
             } catch {
                 if let i = residences.firstIndex(where: { $0.id == before.id }) { residences[i] = before }
                 lastError = "\(activity.name): \(Self.describe(error))"
+                noteIfMalformed(error)
                 notify()
                 if case LevitonClient.Error.unauthorized = error { refresh() }
             }
@@ -620,6 +692,7 @@ final class DeviceStore {
                 if let (ri, di) = locate(id) { residences[ri].devices[di] = before; Self.recomputeRooms(&residences[ri]) }
                 lastError = "\(before.name): \(Self.describe(error))"
                 Diagnostics.shared.record(.app, "\(before.name): write failed, row snapped back — \(Self.describe(error))", isError: true)
+                noteIfMalformed(error)
                 notify()
                 if case LevitonClient.Error.unauthorized = error { refresh() }   // triggers re-login
             }
@@ -637,7 +710,7 @@ final class DeviceStore {
     /// `checkFeedDelivered` only runs while the feed reports live, and the tests fake that
     /// rather than stand up a socket. Not used by the app.
     func overrideLiveForTesting(_ live: Bool) {
-        isLive = live
+        setLive(live)
     }
 
     // MARK: Helpers
