@@ -92,8 +92,10 @@ final class LevitonClient: Sendable {
 
     private let session: URLSession
 
-    init() {
-        let c = URLSessionConfiguration.ephemeral
+    /// The configuration parameter exists for the tests, which slide a URLProtocol stub in
+    /// front of the network; the app always takes the default.
+    init(configuration: URLSessionConfiguration = .ephemeral) {
+        let c = configuration
         c.timeoutIntervalForRequest = 20
         c.httpAdditionalHeaders = ["Accept": "application/json", "User-Agent": "NimbusLevitonBar"]
         session = URLSession(configuration: c)

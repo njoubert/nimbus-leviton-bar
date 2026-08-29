@@ -30,6 +30,18 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
     /// healthy until the kernel gives up retransmitting — minutes later.
     static let pongTimeout: TimeInterval = 10
 
+    /// The statics above are the app's values; the instance knobs exist so the tests can
+    /// point at a localhost server and force a pong timeout in milliseconds rather than
+    /// editing constants (which is how it was measured by hand, per CLAUDE.md). Set them
+    /// before `start()`.
+    let url: URL
+    var pingInterval: TimeInterval = LevitonRealtime.pingInterval
+    var pongTimeout: TimeInterval = LevitonRealtime.pongTimeout
+    /// The backoff after an auth rejection (close 1008): an hour in the app.
+    var authBackoff: TimeInterval = 3600
+    /// The ordinary reconnect backoff's ceiling.
+    var maxBackoff: TimeInterval = 60
+
     var onUpdate: ((String, LevitonClient.DeviceFields) -> Void)?
     /// The feed went live (authenticated and subscribed) or stopped being live — a drop, an
     /// auth rejection, `stop()`. The menu says "live" on the strength of this; the REST poll
@@ -59,9 +71,10 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
     private var backoff: TimeInterval = 1
     private var generation = 0   // bumped per connection so stale callbacks are ignored
 
-    init(session: Keychain.Session, deviceIds: [String]) {
+    init(session: Keychain.Session, deviceIds: [String], url: URL = LevitonRealtime.url) {
         self.session = session
         self.deviceIds = Set(deviceIds)
+        self.url = url
     }
 
     func start() {
@@ -93,7 +106,7 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
         guard !stopped else { return }
         teardown()
         generation += 1
-        var req = URLRequest(url: Self.url)
+        var req = URLRequest(url: url)
         req.setValue("https://my.leviton.com", forHTTPHeaderField: "Origin")
         req.timeoutInterval = 30
         let t = urlSession.webSocketTask(with: req)
@@ -129,7 +142,7 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
         let gen = generation
         log("reconnecting in \(Int(delay)) s")
         Diagnostics.shared.feed {
-            $0.state = delay >= 3600 ? "backing off after an auth rejection" : "backing off"
+            $0.state = delay >= authBackoff ? "backing off after an auth rejection" : "backing off"
             $0.backoff = delay
             $0.nextReconnect = Date().addingTimeInterval(delay)
         }
@@ -180,10 +193,10 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
         Diagnostics.shared.feed { $0.drops += 1 }
         teardown()
         if authFailure {
-            reconnect(after: 3600)
+            reconnect(after: authBackoff)
         } else {
             reconnect(after: backoff)
-            backoff = min(backoff * 2, 60)
+            backoff = min(backoff * 2, maxBackoff)
         }
     }
 
@@ -295,19 +308,19 @@ final class LevitonRealtime: NSObject, URLSessionWebSocketDelegate, @unchecked S
     private func startPing() {
         pingTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + Self.pingInterval, repeating: Self.pingInterval)
+        timer.schedule(deadline: .now() + pingInterval, repeating: pingInterval)
         timer.setEventHandler { [weak self] in
             guard let self, let t = self.task else { return }
             let gen = self.generation
             let deadline = DispatchWorkItem { [weak self] in
                 guard let self, self.generation == gen else { return }
-                self.log("pong timed out after \(Int(Self.pongTimeout)) s")
-                Diagnostics.shared.record(.app, "feed: no pong in \(Int(Self.pongTimeout)) s — the connection is open but dead", isError: true)
+                self.log("pong timed out after \(Int(self.pongTimeout)) s")
+                Diagnostics.shared.record(.app, "feed: no pong in \(Int(self.pongTimeout)) s — the connection is open but dead", isError: true)
                 self.handleDrop(authFailure: false)
             }
             self.pongDeadline?.cancel()
             self.pongDeadline = deadline
-            self.queue.asyncAfter(deadline: .now() + Self.pongTimeout, execute: deadline)
+            self.queue.asyncAfter(deadline: .now() + self.pongTimeout, execute: deadline)
             let sent = Date()
             Diagnostics.shared.feed { $0.lastPing = sent; $0.lastPong = nil }
             t.sendPing { [weak self] e in

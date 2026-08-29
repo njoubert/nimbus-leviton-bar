@@ -35,7 +35,12 @@ final class DeviceStore {
     private(set) var lastError: String?
     var onChange: (() -> Void)?
 
-    private let client = LevitonClient()
+    private let client: LevitonClient
+    private let credentials: CredentialStore
+    /// Builds the realtime feed when a refresh succeeds. Injectable so the tests can point
+    /// it at a local server or switch it off (nil = poll only); the default is the real one.
+    var realtimeFactory: (Keychain.Session, [String]) -> LevitonRealtime? =
+        { LevitonRealtime(session: $0, deviceIds: $1) }
     private var session: Keychain.Session?
     /// When the saved password was last replayed because a token was rejected. A second
     /// rejection inside `reloginCooldown` is *not* answered with another login: a 401 that
@@ -85,7 +90,11 @@ final class DeviceStore {
 
     // MARK: Lifecycle
 
-    init() {
+    /// Both parameters exist for the tests; the app takes the defaults (the real client, the
+    /// real Keychain).
+    init(client: LevitonClient = LevitonClient(), credentials: CredentialStore = KeychainCredentialStore()) {
+        self.client = client
+        self.credentials = credentials
         // Sleep suspends the ping timer, and a wake usually leaves the websocket half-open with
         // no error to notice — and whatever changed while we slept was never pushed. So: kick
         // the feed and refetch. Nothing else in the app watches sleep or the network.
@@ -104,9 +113,9 @@ final class DeviceStore {
     /// Pick up the saved session or password from the Keychain. Returns false when there is
     /// nothing saved and the caller should ask the user to sign in.
     func start() -> Bool {
-        let login = Keychain.loadLogin()
+        let login = credentials.loadLogin()
         email = login?.email
-        let saved = Keychain.loadSession()
+        let saved = credentials.loadSession()
         if let s = saved, s.isFresh {
             session = s
             Diagnostics.shared.setSession(s)
@@ -122,7 +131,7 @@ final class DeviceStore {
             signIn(login, remember: false)
             return true
         }
-        Diagnostics.shared.record(.app, "launch: nothing saved in the Keychain\(Keychain.readFailureHint)")
+        Diagnostics.shared.record(.app, "launch: nothing saved in the Keychain\(credentials.readFailureHint)")
         state = .signedOut
         notify()
         return false
@@ -142,8 +151,8 @@ final class DeviceStore {
         Task {
             do {
                 let s = try await client.login(email: login.email, password: login.password, code: code)
-                if remember { try Keychain.saveLogin(login) }
-                try? Keychain.saveSession(s)
+                if remember { try credentials.saveLogin(login) }
+                try? credentials.saveSession(s)
                 session = s
                 Diagnostics.shared.setSession(s)
                 Diagnostics.shared.record(.app, "signed in: session \(Diagnostics.fingerprint(s.token))"
@@ -172,8 +181,8 @@ final class DeviceStore {
         stopPolling()
         session = nil
         residences = []
-        Keychain.deleteSession()
-        Keychain.deleteLogin()
+        credentials.deleteSession()
+        credentials.deleteLogin()
         state = .signedOut
         notify()
     }
@@ -244,19 +253,19 @@ final class DeviceStore {
     /// The menu's Retry: sign in again if there is no session (a failed sign-in leaves none),
     /// otherwise fetch again.
     func retry() {
-        if session == nil, let login = Keychain.loadLogin() { signIn(login, remember: false) }
+        if session == nil, let login = credentials.loadLogin() { signIn(login, remember: false) }
         else { refresh() }
     }
 
     /// A token was rejected. Replay the saved password once per cooldown; otherwise give up
     /// on this session and say so — the next poll tries again later.
     private func handleUnauthorized() {
-        Keychain.deleteSession()
+        credentials.deleteSession()
         session = nil
         Diagnostics.shared.setSession(nil)
         stopPolling()
         let recent = lastRelogin.map { Date().timeIntervalSince($0) < Self.reloginCooldown } ?? false
-        if !recent, let login = Keychain.loadLogin() {
+        if !recent, let login = credentials.loadLogin() {
             Diagnostics.shared.record(.app, "My Leviton rejected the session — replaying the saved password once", isError: true)
             lastRelogin = Date()
             signIn(login, remember: false)
@@ -295,13 +304,13 @@ final class DeviceStore {
     /// guards the automatic path is reset with it: this is a person asking, not a loop.
     func forceRelogin() {
         Diagnostics.shared.record(.app, "Internals: forcing a new sign-in")
-        guard let login = Keychain.loadLogin() else {
+        guard let login = credentials.loadLogin() else {
             lastError = "no password saved — sign in from the menu"
             notify()
             return
         }
         if let s = session { Task { await client.logout(s) } }
-        Keychain.deleteSession()
+        credentials.deleteSession()
         session = nil
         Diagnostics.shared.setSession(nil)
         stopPolling()
@@ -341,8 +350,7 @@ final class DeviceStore {
     }
 
     private func startRealtime() {
-        guard let s = session else { return }
-        let rt = LevitonRealtime(session: s, deviceIds: devices.map(\.id))
+        guard let s = session, let rt = realtimeFactory(s, devices.map(\.id)) else { return }
         rt.onUpdate = { [weak self] id, fields in   // called on the main queue
             MainActor.assumeIsolated { self?.apply(id: id, fields: fields) }
         }
@@ -596,6 +604,20 @@ final class DeviceStore {
                 if case LevitonClient.Error.unauthorized = error { refresh() }   // triggers re-login
             }
         }
+    }
+
+    // MARK: Test seams
+
+    /// The realtime feed's path into the store, callable directly by the tests — `apply` is
+    /// otherwise reachable only through a live socket. Not used by the app.
+    func applyRealtimeForTesting(id: String, fields: LevitonClient.DeviceFields) {
+        apply(id: id, fields: fields)
+    }
+
+    /// `checkFeedDelivered` only runs while the feed reports live, and the tests fake that
+    /// rather than stand up a socket. Not used by the app.
+    func overrideLiveForTesting(_ live: Bool) {
+        isLive = live
     }
 
     // MARK: Helpers

@@ -25,5 +25,11 @@ let package = Package(
                 .linkedFramework("ServiceManagement"),
             ]
         ),
+        // The tests import the executable target directly (@testable import works for
+        // executables on macOS since Swift 5.5); no library split needed.
+        .testTarget(
+            name: "NimbusLevitonBarTests",
+            dependencies: ["NimbusLevitonBar"]
+        ),
     ]
 )
