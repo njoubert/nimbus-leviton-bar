@@ -19,6 +19,9 @@ xcrun llvm-cov report \
 .build/debug/NimbusLevitonBar --probe     # the LIVE check: read-only, cached session,
                                           # exit 1 when my.leviton.com drifts from the
                                           # shapes this code assumes
+.build/debug/NimbusLevitonBar --demo      # the real app on staged sample data (drift ⚠︎
+                                          # included) — hermetic; for eyeballing states the
+                                          # live service rarely shows. Ctrl-C quits.
 ```
 
 `--print` and `--watch` remain the live correctness checks; `--probe` is the drift tripwire

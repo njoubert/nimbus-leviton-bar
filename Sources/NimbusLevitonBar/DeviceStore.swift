@@ -136,7 +136,10 @@ final class DeviceStore {
     var devicesOn: Int { devices.filter(\.isOn).count }
     var devicesReachable: Int { devices.filter(\.connected).count }
     var devicesOffline: Int { devices.count - devicesReachable }
-    var isSignedIn: Bool { session != nil }
+    /// `demoStaged` counts as signed in for *display* only — every network path gates on
+    /// `session` directly, which is what keeps `--demo` provably offline.
+    var isSignedIn: Bool { session != nil || demoStaged }
+    private var demoStaged = false
 
     /// "6 of 13 on" — the All Devices row's tally.
     var tally: String {
@@ -248,6 +251,7 @@ final class DeviceStore {
         if let s = session { Task { await client.logout(s) } }
         stopPolling()
         session = nil
+        demoStaged = false
         residences = []
         anomalies = []
         feedMisses = []
@@ -697,6 +701,22 @@ final class DeviceStore {
                 if case LevitonClient.Error.unauthorized = error { refresh() }   // triggers re-login
             }
         }
+    }
+
+    /// `--demo` (see `DemoState`): stage the store with sample data so the real menu can be
+    /// eyeballed with no account, no network and no Keychain. There is no session, so a click
+    /// flips a row optimistically and `send` quietly does nothing — which is exactly right
+    /// for a showroom. Never called outside the demo path and the tests.
+    func seedForDemo(_ rs: [Residence], anomaly: String? = nil) {
+        demoStaged = true
+        residences = rs
+        for i in residences.indices { Self.recomputeRooms(&residences[i]) }
+        email = "demo@example.com"
+        lastRefresh = Date()
+        state = .ready
+        setLive(true)
+        if let anomaly { noteAnomaly(.feedMisses, anomaly) }
+        notify()
     }
 
     // MARK: Test seams

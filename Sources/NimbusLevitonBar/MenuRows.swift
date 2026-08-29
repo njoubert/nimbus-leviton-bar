@@ -496,7 +496,9 @@ enum MenuRowPreview {
         let status = TextRow {}; status.set("Refresh", detail: "live")
         let polled = TextRow {}; polled.set("Refresh", detail: "updated 47 seconds ago")
         let warn = TextRow {}; warn.set("Refresh", detail: "⚠︎ Desk: my.leviton.com timed out", warning: true)
-        rows += [all, allBad, scene, status, polled, warn]
+        // The drift warning: the reading stays, the ⚠︎ is the news (`DeviceStore.apiAnomaly`).
+        let drift = TextRow {}; drift.set("Refresh", detail: "⚠︎ live", warning: true)
+        rows += [all, allBad, scene, status, polled, warn, drift]
         // The same device rows with ⌥ down: the slider and the percent give way to the model
         // and firmware, on dimmers and plain switches alike.
         let held = TextRow {}; held.set("⌥ held", detail: "model · firmware")

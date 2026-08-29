@@ -660,6 +660,30 @@ final class DeviceStoreTests: XCTestCase {
         XCTAssertNil(store.apiAnomaly)
     }
 
+    /// `--demo` rides on this seam; if it drifts, the showroom silently stops matching the
+    /// real states it exists to show.
+    func testSeedForDemoStagesAReadyLiveStoreWithTheDriftWarning() {
+        let (store, http, _) = makeStore(session: nil, login: nil)
+        store.seedForDemo(
+            [Residence(id: "demo", name: "Demo", rooms: [Room(id: "r", name: "Room", power: false)],
+                       devices: [Fixtures.device(id: "5", name: "Desk", roomId: "r", power: true, brightness: 40)])],
+            anomaly: "staged drift")
+        XCTAssertEqual(store.state, .ready)
+        XCTAssertTrue(store.isLive)
+        XCTAssertEqual(store.apiAnomaly, "staged drift")
+        XCTAssertEqual(store.tally, "1 of 1 on")
+        XCTAssertTrue(store.residences[0].rooms[0].power, "room power should be recomputed from the devices")
+        XCTAssertTrue(http.requests.isEmpty, "the demo must never talk to the network")
+        XCTAssertTrue(store.isSignedIn, "display-only: the staged store must not read as signed out")
+
+        // But every network path gates on the (absent) session, not the display flag.
+        store.refresh()
+        store.setPower("5", on: false)   // flips the row optimistically, sends nothing
+        XCTAssertTrue(http.requests.isEmpty, "a staged store must stay silent on the wire")
+        store.signOut()
+        XCTAssertFalse(store.isSignedIn)
+    }
+
     // MARK: stop() is sticky
 
     /// The bug this campaign found: `toggleRoom`/`runActivity` sleep 1.5 s and then

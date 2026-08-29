@@ -14,6 +14,9 @@ import NimbusUpdater
 //   --render-iconset DIR    write an .iconset (for iconutil) and exit
 //   --render-dmg-background DIR [--signed]   write the disk image's background PNGs and exit
 //   --render-social PATH    write the GitHub social preview card (1280×640) and exit
+//   --demo                  launch the real app on staged sample data — no account, no
+//                           network, no Keychain; clicks go nowhere. The drift warning is
+//                           staged too, so the ⚠︎ states can be eyeballed by hand.
 //   --dump-bar PATH         render just the status item to PATH, quit (layout check)
 //   --dump-menu PATH        render the menu's rows with sample data to PATH, quit (layout check)
 //   --dump-internals PATH   render the Internals panel with sample data to PATH, quit (layout check)
@@ -34,7 +37,8 @@ import NimbusUpdater
 
 func usage() -> Never {
     print("""
-    usage: NimbusLevitonBar [--enable-login-item | --disable-login-item | --login-item-status]
+    usage: NimbusLevitonBar [--demo]
+                            [--enable-login-item | --disable-login-item | --login-item-status]
                             [--render-icon PATH [--size PX]] [--render-iconset DIR]
                             [--render-social PATH]
                             [--login EMAIL | --logout | --print | --set DEVICE on|off|N]
@@ -49,6 +53,7 @@ func usage() -> Never {
 }
 
 var enableLoginItem = false
+var demoMode = false
 var dumpBarPath: String?
 var renderIconPath: String?
 var renderIconSize = 1024
@@ -67,6 +72,7 @@ while !args.isEmpty {
     let a = args.removeFirst()
     switch a {
     case "--enable-login-item": enableLoginItem = true
+    case "--demo": demoMode = true
     case "--disable-login-item":
         do { try LoginItem.setEnabled(false); print("login item: \(LoginItem.statusDescription)") }
         catch { fputs("could not unregister login item: \(error)\n", stderr); exit(1) }
@@ -175,13 +181,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         installEditMenu()
 
-        store = DeviceStore()
+        store = demoMode ? DemoState.store() : DeviceStore()
 
         // The updater, unless this launch is a screenshot run. It checks GitHub for a newer
         // release (daily, and when the menu opens if the last check is stale), stages one that
         // is signed by the same Developer ID as this copy, and waits for a click.
         var updater: Updater?
-        if dumpBarPath == nil, let version = Updates.runningVersion {
+        if dumpBarPath == nil, !demoMode, let version = Updates.runningVersion {
             let u = Updater(config: Updates.config(currentVersion: version))
             u.onWillRelaunch = { [weak store] in store?.stop() }
             updater = u
@@ -203,7 +209,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Nothing saved in the Keychain: ask now, once. Cancel leaves the menu's Sign In… row.
-        if !store.start(), dumpBarPath == nil, let login = SignInDialog.run() {
+        // (Demo mode arrives already staged — no start(), no dialog, no network.)
+        if !demoMode, !store.start(), dumpBarPath == nil, let login = SignInDialog.run() {
             store.signIn(login)
         }
 

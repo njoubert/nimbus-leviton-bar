@@ -113,6 +113,9 @@ queue, which `DeviceStore` enters with `MainActor.assumeIsolated`. `LevitonClien
 .build/debug/NimbusLevitonBar --check-update  the release feed as the updater reads it
 .build/debug/NimbusLevitonBar --probe         read-only: does the live API still answer in the
                                               shapes this code assumes? Exit 1 on drift.
+.build/debug/NimbusLevitonBar --demo          the real app on staged sample data, the drift ⚠︎
+                                              included — hermetic: inert Keychain, a client
+                                              whose requests all fail on the spot (Ctrl-C quits)
 ```
 
 **`swift test` is the correctness check** — ~245 tests, no network beyond localhost, no
