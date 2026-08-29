@@ -1,0 +1,7 @@
+The menu now tells you when My Leviton itself is acting strange.
+
+**A small ⚠︎ beside the Refresh row's reading** appears when my.leviton.com stops behaving like the API this app is written against: the push feed was caught missing changes three times inside half an hour, a reply arrived that the app could not read, or the feed's sign-in was rejected. Routine trouble — a dropped connection, a timeout, a plain server error — never shows it; that comes and goes on its own. Hover the ⚠︎ for what happened and where to look next (⌥ Internals, and the CLI's `--probe`); the badge clears an hour after the last sign of trouble, or the moment the feed signs back in.
+
+For the curious, **`--demo`** launches the app on staged sample data — rooms, scenes, the warning above — with no account, no Keychain, and nothing on the wire. The states the real service rarely shows, clickable by hand.
+
+Signed with a Developer ID and notarized. Requires macOS 15 and Apple silicon.

@@ -37,7 +37,7 @@ cd "$(dirname "$0")"
 NAME=NimbusLevitonBar          # executable / target / process name
 APP_NAME="Nimbus Leviton Bar"  # what the user sees: the .app, the volume, Login Items
 BUNDLE_ID=com.njoubert.nimbuslevitonbar
-VERSION=2.1.1
+VERSION=2.2.0
 INSTALL_DIR=/Applications
 INSTALLED="$INSTALL_DIR/$APP_NAME.app"
 DEV_APP="dist/debug/$APP_NAME.app"
