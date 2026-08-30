@@ -102,7 +102,7 @@ queue, which `DeviceStore` enters with `MainActor.assumeIsolated`. `LevitonClien
 .build/debug/NimbusLevitonBar --watch         realtime frames to stderr (token redacted)
 .build/debug/NimbusLevitonBar --journal PATH  the --watch feed, timestamped to the ms,
                                               appended to PATH — under nohup it is the
-                                              forensics tripwire (docs/spikes/2026-08-29/)
+                                              forensics tripwire
 .build/debug/NimbusLevitonBar --get PATH      raw GET, pretty-printed (poking at new endpoints)
 .build/debug/NimbusLevitonBar --put PATH JSON raw PUT (record fields the app never writes)
 .build/debug/NimbusLevitonBar --scenes        the Activities and what each one sets
@@ -350,7 +350,9 @@ update) apply.
   (enrolled 2026-08-22..24) sit on an Amazon **Matter** fabric (`matterFabric` vendor
   4631; firmware 1.0.0 misreported it as vendor 0 until the 1.0.15 update), so an Echo can
   command them without my.leviton.com seeing a write. The decoder table, the tripwire
-  runbook and the open investigation live in `docs/spikes/2026-08-29/lights-forensics.md`.
+  runbook and the open investigation live in a spike kept outside this repo — it is in
+  git history up to 2026-08-29 (`docs/spikes/2026-08-29/lights-forensics.md`) and
+  deliberately not in the tree; ask the owner for the current copy.
 
 ## What happens when My Leviton misbehaves (DeviceStore)
 
