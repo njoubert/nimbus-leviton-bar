@@ -7,7 +7,7 @@ import NimbusUpdater
 // My Leviton cloud. See README.md.
 //
 // Flags (all optional; build.sh uses most of them):
-//   --enable-login-item     register this bundle as a Login Item, then keep running
+//   --enable-login-item     register this bundle as a Login Item and exit
 //   --disable-login-item    unregister the Login Item and exit
 //   --login-item-status     print the Login Item state and exit
 //   --render-icon PATH [--size PX]   write the app icon as a PNG and exit
@@ -37,7 +37,6 @@ func usage() -> Never {
     exit(2)
 }
 
-var enableLoginItem = false
 var dumpBarPath: String?
 var renderIconPath: String?
 var renderIconSize = 1024
@@ -55,7 +54,12 @@ func takeValue(_ flag: String) -> String {
 while !args.isEmpty {
     let a = args.removeFirst()
     switch a {
-    case "--enable-login-item": enableLoginItem = true
+    case "--enable-login-item":
+        do { try LoginItem.setEnabled(true); print("login item: \(LoginItem.statusDescription)") }
+        catch { fputs("could not register login item: \(error)\n", stderr); exit(1) }
+        UserDefaults.standard.set(true, forKey: LoginItem.registeredDefaultsKey)
+        UserDefaults.standard.synchronize()   // about to exit; do not leave the write pending
+        exit(0)
     case "--disable-login-item":
         do { try LoginItem.setEnabled(false); print("login item: \(LoginItem.statusDescription)") }
         catch { fputs("could not unregister login item: \(error)\n", stderr); exit(1) }
@@ -168,13 +172,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updater?.onChange = { [weak self] in self?.statusBar.updaterChanged() }
         updater?.start()
 
-        // Login Item. `build.sh install` passes --enable-login-item; a drag-install from the
-        // disk image has nobody to pass it, so the first launch from /Applications registers
-        // too. Once only — the flag is then set, so turning it off later (menu, System
-        // Settings) sticks across relaunches and updates.
+        // Login Item. `build.sh install` registers with --enable-login-item before launching;
+        // a drag-install from the disk image has nobody to do that, so the first launch from
+        // /Applications registers instead. Once only — the flag is then set, so turning it
+        // off later (menu, System Settings) sticks across relaunches and updates.
         let installed = Bundle.main.bundlePath.hasPrefix("/Applications/")
         let registered = UserDefaults.standard.bool(forKey: LoginItem.registeredDefaultsKey)
-        if enableLoginItem || (installed && !registered) {
+        if installed && !registered {
             do { try LoginItem.setEnabled(true); NSLog("login item: \(LoginItem.statusDescription)") }
             catch { NSLog("could not register login item: \(error)") }
             UserDefaults.standard.set(true, forKey: LoginItem.registeredDefaultsKey)

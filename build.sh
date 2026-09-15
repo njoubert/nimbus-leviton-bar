@@ -347,11 +347,10 @@ case "$cmd" in
     fi
     ditto "$REL_APP" "$INSTALLED"
     # SMAppService registration is done by the app itself, for the bundle it runs from —
-    # so launch the installed copy and have it register.
-    open -n "$INSTALLED" --args --enable-login-item
-    sleep 1.5
+    # so run the installed copy to register (it prints the state and exits), then launch it.
+    "$INSTALLED/Contents/MacOS/$NAME" --enable-login-item || warn "could not register the login item"
+    open "$INSTALLED"
     say "installed $INSTALLED"
-    note "login item: $("$INSTALLED/Contents/MacOS/$NAME" --login-item-status)"
     note "It is running now and will start at login. Toggle that in the menu or in System Settings › General › Login Items."
     ;;
 
